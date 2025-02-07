@@ -1,0 +1,63 @@
+{
+	"id": "1e326237-8d11-492c-8879-d305f2bc83a4",
+	"name": "Mainnet",
+	"values": [
+		{
+			"key": "indexerBaseUrl",
+			"value": "https://indexer.dydx.trade/v4/",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "validdYdXAddress",
+			"value": "dydx1x5mupfyncj7w9zcpq3qcuvhdsdarm5gecensyl",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "invaliddYdXAddress",
+			"value": "dydy1x5mupfyncj7w9zcpq3qcuvhdsdarm5gecensyl",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "validdYdXAddressSubAccountNumber",
+			"value": "0",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "invaliddYdXAddressSubAccountNumber",
+			"value": "a",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "referralCode",
+			"value": "",
+			"type": "any",
+			"enabled": true
+		},
+		{
+			"key": "invalidReferralCode",
+			"value": "",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "dydxWithReferrals",
+			"value": "dydx1g89gc8ud4jwcywe7vty67a5uypt8yvzzhklu5j",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "dydxWithReferrals2",
+			"value": "dydx1z7lza7txd6f73tsxvvmrfya76j3lgapajwfqpc",
+			"type": "default",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "environment",
+	"_postman_exported_at": "2025-02-07T09:19:41.546Z",
+	"_postman_exported_using": "Postman/11.31.3"
+}

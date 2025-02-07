@@ -1,0 +1,111 @@
+name: Newman Tests with NordLayer VPN
+
+on:
+  workflow_dispatch:
+    inputs:
+      override-commit-check:
+        description: "Run the tests regardless of whether there's a new commit"
+        required: false
+        default: "false"
+
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  run-postman-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out this repo
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      # --------------------------------
+      # 1. Install Newman
+      # --------------------------------
+      - name: Install Newman (Postman CLI)
+        run: npm install -g newman
+
+      # --------------------------------
+      # 2. Install & Configure NordLayer
+      # --------------------------------
+      - name: Install NordLayer CLI
+        run: |
+          sudo apt-get update
+          sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
+          sudo apt-get install -f -y
+          sudo apt-get update
+          sudo apt-get install -y nordlayer
+          
+          # Restart the nordlayer service
+          sudo systemctl daemon-reload
+          sudo systemctl restart nordlayer.service
+          sleep 2
+          
+          # Fix socket permissions
+          sudo chown -R runner:runner /run/nordlayer/
+          sudo chmod 755 /run/nordlayer
+          sudo chmod 666 /run/nordlayer/nordlayer.sock
+
+      - name: Authenticate with NordLayer
+        run: |
+          nordlayer login \
+            --email "${{ secrets.NORDLAYER_EMAIL }}" \
+            --password "${{ secrets.NORDLAYER_PASSWORD }}" \
+            --organization "dydxopsdao"
+
+      - name: Connect to NordLayer Server
+        run: |
+          nordlayer gateways
+          nordlayer connect "dos-server-BQG2cKQV"
+
+      - name: Verify VPN Connection
+        run: |
+          echo "Verifying VPN IP..."
+          curl ifconfig.me
+
+      # --------------------------------
+      # 3. Run Newman Tests
+      # --------------------------------
+      - name: Run Postman Tests
+        run: |
+            npm install -g newman newman-reporter-htmlextra
+            newman run postman/collection.json \
+            -e postman/environment.json \
+            --reporters cli,htmlextra,junit \
+            --reporter-htmlextra-export newman-report.html \
+            --reporter-junit-export results.xml
+
+      # --------------------------------
+      # 4. Disconnect from NordLayer
+      # --------------------------------
+      - name: Debug NordLayer Status
+        if: always()
+        run: nordlayer status
+
+      - name: Disconnect from NordLayer
+        if: always()
+        run: nordlayer disconnect || echo "Already disconnected"
+
+      # --------------------------------
+      # 5. Upload Test Results
+      # --------------------------------    
+      - name: Upload Test Results (JUnit XML)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+            name: postman-test-results
+            path: results.xml
+
+      - name: Upload HTML Report (Nice UI)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+            name: postman-html-report
+            path: newman-report.html
