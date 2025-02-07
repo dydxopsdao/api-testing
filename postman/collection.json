@@ -689,7 +689,7 @@
 										"method": "GET",
 										"header": [],
 										"url": {
-											"raw": "{{indexerBaseUrl}}/affiliates/address?referralCode=RobustGoatZEE",
+											"raw": "{{indexerBaseUrl}}/affiliates/address?referralCode={{referralCode}}",
 											"host": [
 												"{{indexerBaseUrl}}"
 											],
@@ -700,12 +700,7 @@
 											"query": [
 												{
 													"key": "referralCode",
-													"value": "{{referralCode}}",
-													"disabled": true
-												},
-												{
-													"key": "referralCode",
-													"value": "RobustGoatZEE"
+													"value": "{{referralCode}}"
 												}
 											]
 										}
