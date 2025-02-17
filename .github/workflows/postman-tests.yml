@@ -1,18 +1,60 @@
-name: Newman Tests with NordLayer VPN
+name: Newman Tests with NordLayer VPN (Testnet)
 
 on:
   workflow_dispatch:
     inputs:
       override-commit-check:
-        description: "Run the tests regardless of whether there's a new commit"
+        description: "Run the tests regardless of upstream workflow status"
         required: false
         default: "false"
-
   schedule:
     - cron: "*/15 * * * *"
 
 jobs:
+  # Check the status of the upstream testnet workflow
+  check-upstream:
+    runs-on: ubuntu-latest
+    outputs:
+      upstream-success: ${{ steps.check.outputs.upstream-success }}
+    steps:
+      - name: Check upstream workflow run status
+        id: check
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = "dydxprotocol";
+            const repo = "v4-chain";
+            // The upstream workflow file for testnet deployments.
+            const workflowFile = "indexer-build-and-push-testnet.yml";
+            
+            // Get the most recent completed run of the upstream workflow.
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: workflowFile,
+              status: "completed",
+              per_page: 1
+            });
+            
+            if (runs.total_count > 0) {
+              const latestRun = runs.workflow_runs[0];
+              if (latestRun.conclusion === "success") {
+                core.setOutput("upstream-success", "true");
+                console.log("Latest upstream workflow run was successful.");
+              } else {
+                core.setOutput("upstream-success", "false");
+                console.log("Latest upstream workflow run did not succeed.");
+              }
+            } else {
+              core.setOutput("upstream-success", "false");
+              console.log("No upstream workflow run found.");
+            }
+          result-encoding: string
+
+  # Main job: run Newman tests if upstream succeeded or if manually overridden.
   run-postman-tests:
+    needs: check-upstream
+    if: github.event.inputs.override-commit-check == 'true' || needs.check-upstream.outputs.upstream-success == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -43,7 +85,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y nordlayer
           
-          # Restart the nordlayer service
+          # Restart the NordLayer service
           sudo systemctl daemon-reload
           sudo systemctl restart nordlayer.service
           sleep 2
@@ -71,13 +113,13 @@ jobs:
           curl ifconfig.me
 
       # --------------------------------
-      # 3. Run Newman Tests
+      # 3. Run Newman Tests for Testnet
       # --------------------------------
       - name: Run Postman Tests
         run: |
-            npm install -g newman newman-reporter-htmlextra
-            newman run postman/collection.json \
-            -e postman/environment.json \
+          npm install -g newman newman-reporter-htmlextra
+          newman run postman/collection.json \
+            -e postman/environment.testnet.json \
             --reporters cli,htmlextra,junit \
             --reporter-htmlextra-export newman-report.html \
             --reporter-junit-export results.xml
@@ -100,12 +142,40 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-            name: postman-test-results
-            path: results.xml
+          name: postman-test-results
+          path: results.xml
 
       - name: Upload HTML Report (Nice UI)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-            name: postman-html-report
-            path: newman-report.html
+          name: postman-html-report
+          path: newman-report.html
+
+      # --------------------------------
+      # 6. Post Results to Slack
+      # --------------------------------    
+      - name: Notify Slack Channel
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          # Determine the color based on job status.
+          if [ "$JOB_STATUS" = "success" ]; then
+            COLOR="good"
+          else
+            COLOR="danger"
+          fi
+          # Build the JSON payload using jq.
+          PAYLOAD=$(jq -n \
+            --arg channel "indexer-api-testing" \
+            --arg username "github-actions" \
+            --arg icon_emoji ":rocket:" \
+            --arg color "$COLOR" \
+            --arg title "Newman Test Run Result" \
+            --arg text "The Newman tests on testnet have completed with status: $JOB_STATUS." \
+            '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
+          echo "Sending payload to Slack:"
+          echo "$PAYLOAD"
+          curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"

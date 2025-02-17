@@ -1,0 +1,63 @@
+{
+	"id": "f1bad39c-40bd-4c5d-ad59-91b70c5e3c42",
+	"name": "Testnet",
+	"values": [
+		{
+			"key": "indexerBaseUrl",
+			"value": "https://indexer.v4testnet.dydx.exchange/v4/",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "validdYdXAddress",
+			"value": "dydx1agft8a3vf97velgseu5jz8m09f0xku2mnkayrz",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "invaliddYdXAddress",
+			"value": "dydy1x5mupfyncj7w9zcpq3qcuvhdsdarm5gecensyl",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "validdYdXAddressSubAccountNumber",
+			"value": "0",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "invaliddYdXAddressSubAccountNumber",
+			"value": "a",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "referralCode",
+			"value": "",
+			"type": "any",
+			"enabled": true
+		},
+		{
+			"key": "invalidReferralCode",
+			"value": "",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "dydxWithReferrals",
+			"value": "dydx1s49hc95ggnl6fcq328rw35qmfx05a8zllp9wza",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "dydxWithReferrals2",
+			"value": "dydx1cew7z78590202eujzr799da2p2c5ssq7ahhxze",
+			"type": "default",
+			"enabled": true
+		}
+	],
+	"_postman_variable_scope": "environment",
+	"_postman_exported_at": "2025-02-14T13:45:17.749Z",
+	"_postman_exported_using": "Postman/11.32.2"
+}
