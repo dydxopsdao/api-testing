@@ -4,7 +4,7 @@
 		"name": "dYdX",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "41849022",
-		"_collection_link": "https://dydx-ops-services.postman.co/workspace/fdeed7e0-d6ed-46c3-926d-fdf269d648ad/collection/41849022-981cef60-dcd2-4b5e-aefb-c7d1dd2e08dc?action=share&source=collection_link&creator=41849022"
+		"_collection_link": "https://dydx-ops-services.postman.co/workspace/dYdX~fdeed7e0-d6ed-46c3-926d-fdf269d648ad/collection/41849022-981cef60-dcd2-4b5e-aefb-c7d1dd2e08dc?action=share&source=collection_link&creator=41849022"
 	},
 	"item": [
 		{
@@ -208,7 +208,7 @@
 													"    const jsonData = pm.response.json();",
 													"    const errorMsg = jsonData.errors[0].msg;",
 													"",
-													"    pm.expect(errorMsg).to.match(/^No subaccounts found for address dydy/);",
+													"    pm.expect(errorMsg).to.match(/^No subaccounts found for address /);",
 													"});",
 													""
 												],
@@ -605,7 +605,7 @@
 													"    const jsonData = pm.response.json();",
 													"    const errorMsg = jsonData.errors[0].msg;",
 													"",
-													"    pm.expect(errorMsg).to.match(/^Wallet with address dydy/);",
+													"    pm.expect(errorMsg).to.match(/^Wallet with address /);",
 													"});",
 													""
 												],
@@ -1282,11 +1282,535 @@
 				},
 				{
 					"name": "assetPositions",
-					"item": []
+					"item": [
+						{
+							"name": "/assetPositions VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify response status code",
+											"pm.test(\"Response status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Check response time (threshold set to 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Validate top-level structure: Ensure response is an object with a \"positions\" array",
+											"pm.test(\"Response has 'positions' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"positions\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Validate the schema for each position in the \"positions\" array",
+											"pm.test(\"Validate schema for each position\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    jsonData.positions.forEach((position) => {",
+											"        pm.expect(position).to.be.an(\"object\");",
+											"        pm.expect(position).to.have.property(\"symbol\").that.is.a(\"string\");",
+											"        pm.expect(position).to.have.property(\"side\").that.is.a(\"string\");",
+											"        pm.expect(position).to.have.property(\"size\").that.is.a(\"string\");",
+											"        pm.expect(position).to.have.property(\"assetId\").that.is.a(\"string\");",
+											"        pm.expect(position).to.have.property(\"subaccountNumber\").that.is.a(\"number\");",
+											"",
+											"        // Optionally, check that size is a valid numeric value",
+											"        pm.expect(parseFloat(position.size)).to.not.be.NaN;",
+											"    });",
+											"});",
+											"",
+											"// 5. Validate the response against a JSON schema",
+											"pm.test(\"Response matches expected JSON schema\", function () {",
+											"    const schema = {",
+											"        type: \"object\",",
+											"        properties: {",
+											"            positions: {",
+											"                type: \"array\",",
+											"                items: {",
+											"                    type: \"object\",",
+											"                    properties: {",
+											"                        symbol: { type: \"string\" },",
+											"                        side: { type: \"string\" },",
+											"                        size: { type: \"string\" },",
+											"                        assetId: { type: \"string\" },",
+											"                        subaccountNumber: { type: \"number\" }",
+											"                    },",
+											"                    required: [\"symbol\", \"side\", \"size\", \"assetId\", \"subaccountNumber\"]",
+											"                }",
+											"            }",
+											"        },",
+											"        required: [\"positions\"]",
+											"    };",
+											"",
+											"    pm.response.to.have.jsonSchema(schema);",
+											"});",
+											"",
+											"",
+											"// 6. Ensure no unexpected properties exist in each position object",
+											"pm.test(\"No unexpected properties in position schema\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    const expectedKeys = [\"symbol\", \"side\", \"size\", \"assetId\", \"subaccountNumber\"];",
+											"    jsonData.positions.forEach((position) => {",
+											"        Object.keys(position).forEach((key) => {",
+											"            pm.expect(expectedKeys).to.include(key, `Unexpected property found in position: ${key}`);",
+											"        });",
+											"    });",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/assetPositions/?address={{validdYdXAddress}}&subaccountNumber=0",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"assetPositions",
+										""
+									],
+									"query": [
+										{
+											"key": "address",
+											"value": "{{validdYdXAddress}}"
+										},
+										{
+											"key": "subaccountNumber",
+											"value": "0"
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "/assetPositions INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 400 (Bad Request)",
+											"pm.test(\"Status code is 400\", function () {",
+											"    pm.response.to.have.status(400);",
+											"});",
+											"",
+											"// 2. Verify that the response contains an 'errors' array with at least one error object",
+											"pm.test(\"Response contains an 'errors' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"errors\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.errors.length).to.be.above(0);",
+											"});",
+											"",
+											"// 3. Validate the structure and content of the first error object",
+											"pm.test(\"Error object for subaccountNumber has the expected structure and values\", function () {",
+											"    const error = pm.response.json().errors[0];",
+											"    pm.expect(error).to.be.an(\"object\");",
+											"    pm.expect(error).to.have.property(\"value\").that.eql(\"-\");",
+											"    pm.expect(error).to.have.property(\"msg\").that.eql(\"subaccountNumber must be a non-negative integer less than 128001\");",
+											"    pm.expect(error).to.have.property(\"param\").that.eql(\"subaccountNumber\");",
+											"    pm.expect(error).to.have.property(\"location\").that.eql(\"query\");",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/assetPositions/?address={{validdYdXAddress}}&subaccountNumber=-",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"assetPositions",
+										""
+									],
+									"query": [
+										{
+											"key": "address",
+											"value": "{{validdYdXAddress}}"
+										},
+										{
+											"key": "subaccountNumber",
+											"value": "-"
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "/assetPositions/parentSubaccountNumber VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 200",
+											"pm.test(\"Response status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Check that the response time is acceptable (e.g., less than 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Validate that the response contains a top-level \"subaccount\" object",
+											"pm.test(\"Response contains 'subaccount' object\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"subaccount\").that.is.an(\"object\");",
+											"});",
+											"",
+											"// 4. Validate the structure of the \"subaccount\" object",
+											"pm.test(\"Subaccount object structure is valid\", function () {",
+											"    const subaccount = pm.response.json().subaccount;",
+											"",
+											"    // Validate basic properties and their types",
+											"    pm.expect(subaccount).to.have.property(\"address\").that.is.a(\"string\");",
+											"    pm.expect(subaccount).to.have.property(\"parentSubaccountNumber\").that.is.a(\"number\");",
+											"    pm.expect(subaccount).to.have.property(\"equity\").that.is.a(\"string\");",
+											"    pm.expect(subaccount).to.have.property(\"freeCollateral\").that.is.a(\"string\");",
+											"    pm.expect(subaccount).to.have.property(\"childSubaccounts\").that.is.an(\"array\");",
+											"",
+											"    // Validate the address follows the expected DYDX address format (rough check)",
+											"    const dydxAddressPattern = /^dydx1[a-z0-9]{38}$/;",
+											"    pm.expect(subaccount.address).to.match(dydxAddressPattern, \"Subaccount address format is invalid\");",
+											"});",
+											"",
+											"// 5. Validate the structure of each child subaccount in the \"childSubaccounts\" array",
+											"pm.test(\"Child subaccounts structure is valid\", function () {",
+											"    const childSubaccounts = pm.response.json().subaccount.childSubaccounts;",
+											"    ",
+											"    // Ensure there is at least one child subaccount",
+											"    pm.expect(childSubaccounts.length).to.be.above(0);",
+											"",
+											"    childSubaccounts.forEach((child, index) => {",
+											"        pm.test(`Child subaccount ${index + 1} structure`, function () {",
+											"            pm.expect(child).to.be.an(\"object\");",
+											"            pm.expect(child).to.have.property(\"address\").that.is.a(\"string\");",
+											"            pm.expect(child).to.have.property(\"subaccountNumber\").that.is.a(\"number\");",
+											"            pm.expect(child).to.have.property(\"equity\").that.is.a(\"string\");",
+											"            pm.expect(child).to.have.property(\"freeCollateral\").that.is.a(\"string\");",
+											"            pm.expect(child).to.have.property(\"openPerpetualPositions\").that.is.an(\"object\");",
+											"            pm.expect(child).to.have.property(\"assetPositions\").that.is.an(\"object\");",
+											"            pm.expect(child).to.have.property(\"marginEnabled\").that.is.a(\"boolean\");",
+											"            pm.expect(child).to.have.property(\"updatedAtHeight\").that.is.a(\"string\");",
+											"            pm.expect(child).to.have.property(\"latestProcessedBlockHeight\").that.is.a(\"string\");",
+											"",
+											"            // Validate the address format for the child subaccount",
+											"            const dydxAddressPattern = /^dydx1[a-z0-9]{38}$/;",
+											"            pm.expect(child.address).to.match(dydxAddressPattern, \"Child subaccount address format is invalid\");",
+											"        });",
+											"    });",
+											"});",
+											"",
+											"// 6. Validate the \"assetPositions\" inside each child subaccount without checking exact values",
+											"pm.test(\"Asset positions structure is valid\", function () {",
+											"    const childSubaccounts = pm.response.json().subaccount.childSubaccounts;",
+											"    ",
+											"    childSubaccounts.forEach((child, index) => {",
+											"        pm.test(`Asset positions for child subaccount ${index + 1}`, function () {",
+											"            const assetPositions = child.assetPositions;",
+											"            pm.expect(assetPositions).to.be.an(\"object\");",
+											"",
+											"            // Check that assetPositions has at least one key (example: \"USDC\")",
+											"            pm.expect(Object.keys(assetPositions).length).to.be.above(0);",
+											"",
+											"            // Validate each asset position's structure",
+											"            Object.values(assetPositions).forEach((position) => {",
+											"                pm.expect(position).to.be.an(\"object\");",
+											"                pm.expect(position).to.have.property(\"size\").that.is.a(\"string\");",
+											"                pm.expect(position).to.have.property(\"symbol\").that.is.a(\"string\");",
+											"                pm.expect(position).to.have.property(\"side\").that.is.a(\"string\");",
+											"                pm.expect(position).to.have.property(\"assetId\").that.is.a(\"string\");",
+											"                pm.expect(position).to.have.property(\"subaccountNumber\").that.is.a(\"number\");",
+											"",
+											"                // Optionally, validate that size is a numeric string",
+											"                pm.expect(parseFloat(position.size)).to.not.be.NaN;",
+											"            });",
+											"        });",
+											"    });",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/addresses/{{validdYdXAddress}}/parentSubaccountNumber/0",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"addresses",
+										"{{validdYdXAddress}}",
+										"parentSubaccountNumber",
+										"0"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "/assetPositions/parentSubaccountNumber INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 400 (Bad Request)",
+											"pm.test(\"Status code is 400\", function () {",
+											"    pm.response.to.have.status(400);",
+											"});",
+											"",
+											"// 2. Verify that the response contains an 'errors' array with at least one error object",
+											"pm.test(\"Response contains an 'errors' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"errors\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.errors.length).to.be.above(0);",
+											"});",
+											"",
+											"// 3. Validate the structure and content of the error object for parentSubaccountNumber",
+											"pm.test(\"Error object for parentSubaccountNumber has the expected structure and values\", function () {",
+											"    const error = pm.response.json().errors[0];",
+											"    pm.expect(error).to.be.an(\"object\");",
+											"    pm.expect(error).to.have.property(\"value\").that.eql(\"-\");",
+											"    pm.expect(error).to.have.property(\"msg\").that.eql(\"parentSubaccountNumber must be a non-negative integer less than 128\");",
+											"    pm.expect(error).to.have.property(\"param\").that.eql(\"parentSubaccountNumber\");",
+											"    pm.expect(error).to.have.property(\"location\").that.eql(\"params\");",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/addresses/{{validdYdXAddress}}/parentSubaccountNumber/-",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"addresses",
+										"{{validdYdXAddress}}",
+										"parentSubaccountNumber",
+										"-"
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "candles",
-					"item": []
+					"item": [
+						{
+							"name": "/candles/perpetualMarkets/ticker/ VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Verify the response time is less than 6000ms",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Verify that the response contains a top-level \"candles\" array with at least one candle",
+											"pm.test(\"Response contains a 'candles' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"candles\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.candles.length).to.be.above(0);",
+											"});",
+											"",
+											"// 4. Validate the structure of each candle in the \"candles\" array",
+											"pm.test(\"Each candle has the expected structure for 1MIN resolution\", function () {",
+											"    const candles = pm.response.json().candles;",
+											"    candles.forEach((candle) => {",
+											"        pm.expect(candle).to.be.an(\"object\");",
+											"",
+											"        // Validate required properties and types",
+											"        pm.expect(candle).to.have.property(\"startedAt\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"ticker\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"resolution\").that.is.a(\"string\");",
+											"        // Ensure the resolution is \"1MIN\"",
+											"        pm.expect(candle.resolution).to.eql(\"1MIN\");",
+											"",
+											"        pm.expect(candle).to.have.property(\"low\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"high\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"open\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"close\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"baseTokenVolume\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"usdVolume\").that.is.a(\"string\");",
+											"        pm.expect(candle).to.have.property(\"trades\").that.is.a(\"number\");",
+											"        pm.expect(candle).to.have.property(\"startingOpenInterest\").that.is.a(\"string\");",
+											"    });",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/candles/perpetualMarkets/{{ticker}}?resolution=1MIN",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"candles",
+										"perpetualMarkets",
+										"{{ticker}}"
+									],
+									"query": [
+										{
+											"key": "resolution",
+											"value": "1MIN"
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "/candles/perpetualMarkets/ticker/ INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 400 (Bad Request)",
+											"pm.test(\"Status code is 400\", function () {",
+											"    pm.response.to.have.status(400);",
+											"});",
+											"",
+											"// 2. Verify that the response contains an 'errors' array with at least one error object",
+											"pm.test(\"Response contains an 'errors' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"errors\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.errors.length).to.be.above(0);",
+											"});",
+											"",
+											"// 3. Validate the structure and content of the first error object",
+											"pm.test(\"Error object has the expected structure and values\", function () {",
+											"    const error = pm.response.json().errors[0];",
+											"    pm.expect(error).to.be.an(\"object\");",
+											"    pm.expect(error).to.have.property(\"value\").that.eql(\"1MINS\");",
+											"    pm.expect(error).to.have.property(\"msg\").that.eql(\"resolution must be a valid Candle Resolution, one of 1MIN,5MINS,15MINS,30MINS,1HOUR,4HOURS,1DAY\");",
+											"    pm.expect(error).to.have.property(\"param\").that.eql(\"resolution\");",
+											"    pm.expect(error).to.have.property(\"location\").that.eql(\"query\");",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/candles/perpetualMarkets/{{ticker}}?resolution=1MINS",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"candles",
+										"perpetualMarkets",
+										"{{ticker}}"
+									],
+									"query": [
+										{
+											"key": "resolution",
+											"value": "1MINS"
+										}
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "compliance",
@@ -1295,7 +1819,52 @@
 							"name": "screen",
 							"item": [
 								{
-									"name": "screen/",
+									"name": "compliance/screen/ VALID",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"// 1. Verify the response status code is 200",
+													"pm.test(\"Status code is 200\", function () {",
+													"    pm.response.to.have.status(200);",
+													"});",
+													"",
+													"// 2. Check that the response time is acceptable (e.g., less than 6000ms)",
+													"pm.test(\"Response time is less than 6000ms\", function () {",
+													"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+													"});",
+													"",
+													"// 3. Verify the response body contains the expected properties",
+													"pm.test(\"Response body has the required properties\", function () {",
+													"    const jsonData = pm.response.json();",
+													"    pm.expect(jsonData).to.be.an(\"object\");",
+													"    pm.expect(jsonData).to.have.property(\"status\").that.is.a(\"string\");",
+													"    // 'reason' can be null or a string",
+													"    pm.expect(jsonData).to.have.property(\"reason\");",
+													"    pm.expect(jsonData).to.have.property(\"updatedAt\").that.is.a(\"string\");",
+													"});",
+													"",
+													"// 4. Validate the 'status' value (in this example, it should be \"COMPLIANT\")",
+													"pm.test(\"Status is 'COMPLIANT'\", function () {",
+													"    const jsonData = pm.response.json();",
+													"    pm.expect(jsonData.status).to.eql(\"COMPLIANT\");",
+													"});",
+													"",
+													"// 5. Validate that the 'updatedAt' property is a valid ISO 8601 date-time string",
+													"pm.test(\"updatedAt is a valid ISO 8601 date-time string\", function () {",
+													"    const jsonData = pm.response.json();",
+													"    // Basic regex for ISO 8601 formatted date-time string (e.g., 2024-11-05T08:45:51.899Z)",
+													"    const iso8601Pattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/;",
+													"    pm.expect(jsonData.updatedAt).to.match(iso8601Pattern);",
+													"});",
+													""
+												],
+												"type": "text/javascript",
+												"packages": {}
+											}
+										}
+									],
 									"request": {
 										"method": "GET",
 										"header": [],
@@ -1312,6 +1881,54 @@
 										}
 									},
 									"response": []
+								},
+								{
+									"name": "compliance/screen/INVALID",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"// 1. Verify the response status code is 200",
+													"pm.test(\"Status code is 200\", function () {",
+													"    pm.response.to.have.status(200);",
+													"});",
+													"",
+													"// 2. Validate the response structure for an invalid dYdX address",
+													"pm.test(\"Response contains only the 'status' property with value 'COMPLIANT'\", function () {",
+													"    const jsonData = pm.response.json();",
+													"    pm.expect(jsonData).to.be.an(\"object\");",
+													"    ",
+													"    // Check that 'status' exists and equals \"COMPLIANT\"",
+													"    pm.expect(jsonData).to.have.property(\"status\").that.eql(\"COMPLIANT\");",
+													"    ",
+													"    // Optionally, ensure that other expected properties (reason, updatedAt) are absent",
+													"    pm.expect(jsonData).to.not.have.property(\"reason\");",
+													"    pm.expect(jsonData).to.not.have.property(\"updatedAt\");",
+													"});",
+													""
+												],
+												"type": "text/javascript",
+												"packages": {}
+											}
+										}
+									],
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{indexerBaseUrl}}/compliance/screen/{{invaliddYdXAddress}}",
+											"host": [
+												"{{indexerBaseUrl}}"
+											],
+											"path": [
+												"compliance",
+												"screen",
+												"{{invaliddYdXAddress}}"
+											]
+										}
+									},
+									"response": []
 								}
 							]
 						}
@@ -1319,50 +1936,1367 @@
 				},
 				{
 					"name": "fills",
-					"item": []
+					"item": [
+						{
+							"name": "parentSubaccount",
+							"item": []
+						},
+						{
+							"name": "/fills/ VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// Define a JSON Schema for a fill object",
+											"const fillSchema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"        id: { type: \"string\" },",
+											"        side: { type: \"string\", enum: [\"BUY\", \"SELL\"] },",
+											"        liquidity: { type: \"string\", enum: [\"MAKER\", \"TAKER\"] },",
+											"        type: { type: \"string\", enum: [\"LIMIT\", \"MARKET\"] },",
+											"        market: { type: \"string\" },",
+											"        marketType: { type: \"string\", enum: [\"PERPETUAL\", \"SPOT\"] },",
+											"        price: { type: \"string\" },",
+											"        size: { type: \"string\" },",
+											"        fee: { type: \"string\" },",
+											"        affiliateRevShare: { type: \"string\" },",
+											"        createdAt: { type: \"string\", format: \"date-time\" },",
+											"        createdAtHeight: { type: \"string\" },",
+											"        orderId: { type: \"string\" },",
+											"        clientMetadata: { type: \"string\" },",
+											"        subaccountNumber: { type: \"number\" }",
+											"    },",
+											"    required: [",
+											"        \"id\",",
+											"        \"side\",",
+											"        \"liquidity\",",
+											"        \"type\",",
+											"        \"market\",",
+											"        \"marketType\",",
+											"        \"price\",",
+											"        \"size\",",
+											"        \"fee\",",
+											"        \"affiliateRevShare\",",
+											"        \"createdAt\",",
+											"        \"createdAtHeight\",",
+											"        \"orderId\",",
+											"        \"clientMetadata\",",
+											"        \"subaccountNumber\"",
+											"    ]",
+											"};",
+											"",
+											"// Define the overall response schema and require that the 'fills' array is non-empty",
+											"const responseSchema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"        fills: {",
+											"            type: \"array\",",
+											"            minItems: 1,  // This enforces that the array must contain at least one element.",
+											"            items: fillSchema",
+											"        }",
+											"    },",
+											"    required: [\"fills\"]",
+											"};",
+											"",
+											"// Run tests",
+											"// 1. Status code",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Response time",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Basic structure check for 'fills'",
+											"const jsonData = pm.response.json();",
+											"pm.test(\"Response contains a non-empty 'fills' array\", function () {",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"fills\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.fills.length).to.be.above(0);",
+											"});",
+											"",
+											"// 4. Validate enumerated values in each fill object",
+											"pm.test(\"Each fill has valid enumerated values\", function () {",
+											"    jsonData.fills.forEach((fill, index) => {",
+											"        pm.expect([\"LIMIT\", \"MARKET\"]).to.include(fill.type, `Fill at index ${index} has unexpected type: ${fill.type}`);",
+											"        pm.expect([\"MAKER\", \"TAKER\"]).to.include(fill.liquidity, `Fill at index ${index} has unexpected liquidity: ${fill.liquidity}`);",
+											"        pm.expect([\"BUY\", \"SELL\"]).to.include(fill.side, `Fill at index ${index} has unexpected side: ${fill.side}`);",
+											"    });",
+											"});",
+											"",
+											"// 5. Validate the response against the JSON schema",
+											"pm.test(\"Response schema is valid and non-empty\", function () {",
+											"    pm.response.to.have.jsonSchema(responseSchema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/fills?address={{validdYdXAddress}}&subaccountNumber=0",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"fills"
+									],
+									"query": [
+										{
+											"key": "address",
+											"value": "{{validdYdXAddress}}"
+										},
+										{
+											"key": "subaccountNumber",
+											"value": "0"
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "/fills INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Verify that the response time is acceptable (e.g., less than 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Verify that the response is a JSON object containing a 'fills' array",
+											"pm.test(\"Response contains a 'fills' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"fills\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Verify that the 'fills' array is empty for an invalid address",
+											"pm.test(\"The 'fills' array is empty\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData.fills.length).to.eql(0);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/fills?address={{invaliddYdXAddress}}&subaccountNumber=0",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"fills"
+									],
+									"query": [
+										{
+											"key": "address",
+											"value": "{{invaliddYdXAddress}}"
+										},
+										{
+											"key": "subaccountNumber",
+											"value": "0"
+										}
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "height",
-					"item": []
+					"item": [
+						{
+							"name": "/height",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Check that the status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Verify the response time is acceptable (e.g., less than 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Check that the response is a JSON object",
+											"const jsonData = pm.response.json();",
+											"pm.test(\"Response is a valid JSON object\", function () {",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"});",
+											"",
+											"// 4. Verify the response contains the required properties",
+											"pm.test(\"Response contains 'height' and 'time'\", function () {",
+											"    pm.expect(jsonData).to.have.property(\"height\").that.is.a(\"string\");",
+											"    pm.expect(jsonData).to.have.property(\"time\").that.is.a(\"string\");",
+											"});",
+											"",
+											"// 5. Verify that 'height' is a numeric string",
+											"pm.test(\"'height' is a numeric string\", function () {",
+											"    const heightNum = parseInt(jsonData.height, 10);",
+											"    pm.expect(heightNum).to.be.a(\"number\");",
+											"    pm.expect(heightNum).to.be.above(0);",
+											"});",
+											"",
+											"// 6. Verify that 'time' is a valid ISO 8601 date-time string",
+											"pm.test(\"'time' is a valid ISO 8601 date-time string\", function () {",
+											"    const iso8601Regex = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/;",
+											"    pm.expect(jsonData.time).to.match(iso8601Regex);",
+											"});",
+											"",
+											"// 7. Validate the entire response against a JSON Schema",
+											"const schema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"        height: { type: \"string\" },",
+											"        time: { type: \"string\", format: \"date-time\" }",
+											"    },",
+											"    required: [\"height\", \"time\"]",
+											"};",
+											"",
+											"pm.test(\"Response matches the JSON schema\", function () {",
+											"    pm.response.to.have.jsonSchema(schema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/height",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"height"
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "historicalBlockTradingRewards",
-					"item": []
+					"item": [
+						{
+							"name": "historicalBlockTradingRewards/ VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Verify that the response time is acceptable (e.g., less than 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Verify that the response is a JSON object containing a 'rewards' array",
+											"const jsonData = pm.response.json();",
+											"pm.test(\"Response contains a 'rewards' array\", function () {",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"rewards\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Validate the structure and enumerated values for each reward object",
+											"pm.test(\"Each reward has the expected structure and valid values\", function () {",
+											"    jsonData.rewards.forEach((reward, index) => {",
+											"        pm.expect(reward).to.be.an(\"object\");",
+											"",
+											"        // Check that tradingReward exists and is a numeric string",
+											"        pm.expect(reward).to.have.property(\"tradingReward\").that.is.a(\"string\");",
+											"        pm.expect(parseFloat(reward.tradingReward)).to.not.be.NaN;",
+											"",
+											"        // Check that createdAt exists and is a valid ISO 8601 date-time string",
+											"        pm.expect(reward).to.have.property(\"createdAt\").that.is.a(\"string\");",
+											"        const iso8601Regex = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/;",
+											"        pm.expect(reward.createdAt).to.match(iso8601Regex, `Reward at index ${index} has an invalid createdAt format`);",
+											"",
+											"        // Check that createdAtHeight exists and is a string (you could also verify it's numeric if needed)",
+											"        pm.expect(reward).to.have.property(\"createdAtHeight\").that.is.a(\"string\");",
+											"    });",
+											"});",
+											"",
+											"// 5. Define a JSON Schema for the reward object and overall response",
+											"const rewardSchema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"        tradingReward: { type: \"string\" },",
+											"        createdAt: { type: \"string\", format: \"date-time\" },",
+											"        createdAtHeight: { type: \"string\" }",
+											"    },",
+											"    required: [\"tradingReward\", \"createdAt\", \"createdAtHeight\"]",
+											"};",
+											"",
+											"const responseSchema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"        rewards: {",
+											"            type: \"array\",",
+											"            items: rewardSchema",
+											"        }",
+											"    },",
+											"    required: [\"rewards\"]",
+											"};",
+											"",
+											"// 6. Validate the response against the JSON schema",
+											"pm.test(\"Response matches the JSON schema\", function () {",
+											"    pm.response.to.have.jsonSchema(responseSchema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historicalBlockTradingRewards/{{validdYdXAddress}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historicalBlockTradingRewards",
+										"{{validdYdXAddress}}"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "historicalBlockTradingRewards/ INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"  pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Verify that the response time is acceptable (e.g., less than 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"  pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Verify that the response is a JSON object containing a 'rewards' array",
+											"const jsonData = pm.response.json();",
+											"pm.test(\"Response contains a 'rewards' array\", function () {",
+											"  pm.expect(jsonData).to.be.an(\"object\");",
+											"  pm.expect(jsonData).to.have.property(\"rewards\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Verify that the 'rewards' array is empty for an invalid address",
+											"pm.test(\"The 'rewards' array is empty\", function () {",
+											"  pm.expect(jsonData.rewards.length).to.eql(0);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historicalBlockTradingRewards/{{invaliddYdXAddress}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historicalBlockTradingRewards",
+										"{{invaliddYdXAddress}}"
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "historicalFunding",
-					"item": []
+					"item": [
+						{
+							"name": "historicalFunding/ticker/ VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// Check that the response status is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// Parse the JSON response body",
+											"var jsonData = pm.response.json();",
+											"",
+											"// Check that the response contains a 'historicalFunding' property that is an array",
+											"pm.test(\"Response has a 'historicalFunding' array\", function () {",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"historicalFunding\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// If the array is not empty, validate the structure of each item",
+											"if (jsonData.historicalFunding.length > 0) {",
+											"    pm.test(\"Each funding item has the correct structure and valid data\", function () {",
+											"        jsonData.historicalFunding.forEach(function(item, index) {",
+											"            // Check required properties exist and are strings",
+											"            pm.expect(item, \"Item \" + index + \" should have a 'ticker' property\").to.have.property(\"ticker\").that.is.a(\"string\");",
+											"            pm.expect(item, \"Item \" + index + \" should have a 'rate' property\").to.have.property(\"rate\").that.is.a(\"string\");",
+											"            pm.expect(item, \"Item \" + index + \" should have a 'price' property\").to.have.property(\"price\").that.is.a(\"string\");",
+											"            pm.expect(item, \"Item \" + index + \" should have an 'effectiveAtHeight' property\").to.have.property(\"effectiveAtHeight\").that.is.a(\"string\");",
+											"            pm.expect(item, \"Item \" + index + \" should have an 'effectiveAt' property\").to.have.property(\"effectiveAt\").that.is.a(\"string\");",
+											"            ",
+											"            // Check that the rate, price, and effectiveAtHeight can be converted to numbers",
+											"            pm.expect(parseFloat(item.rate), \"Rate of item \" + index + \" should be a valid number\").to.be.a(\"number\");",
+											"            pm.expect(parseFloat(item.price), \"Price of item \" + index + \" should be a valid number\").to.be.a(\"number\");",
+											"            pm.expect(parseInt(item.effectiveAtHeight, 10), \"effectiveAtHeight of item \" + index + \" should be a valid number\").to.be.a(\"number\");",
+											"            ",
+											"            // Check that effectiveAt is a valid date string",
+											"            var effectiveAtTime = Date.parse(item.effectiveAt);",
+											"            pm.expect(effectiveAtTime, \"effectiveAt of item \" + index + \" should be a valid date\").to.be.a(\"number\");",
+											"            pm.expect(effectiveAtTime, \"effectiveAt of item \" + index + \" should be a valid timestamp\").to.be.above(0);",
+											"        });",
+											"    });",
+											"}",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historicalFunding/{{ticker}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historicalFunding",
+										"{{ticker}}"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "historicalFunding/ticker/ INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// Check that the response status is 400",
+											"pm.test(\"Status code is 400\", function () {",
+											"    pm.response.to.have.status(400);",
+											"});",
+											"",
+											"// Parse the JSON response body",
+											"var jsonData = pm.response.json();",
+											"",
+											"// Check that the response has an 'errors' array with at least one error",
+											"pm.test(\"Response contains an 'errors' array\", function () {",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"errors\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.errors.length).to.be.above(0);",
+											"});",
+											"",
+											"// Validate the structure of the first error object without checking the exact value of 'value'",
+											"var error = jsonData.errors[0];",
+											"pm.test(\"Error object has the expected properties\", function () {",
+											"    // Check that the 'value' property exists and is a string (without checking its exact content)",
+											"    pm.expect(error).to.have.property(\"value\");",
+											"    pm.expect(error.value).to.be.a(\"string\");",
+											"    ",
+											"    // Check other properties with their expected values",
+											"    pm.expect(error).to.have.property(\"msg\", \"ticker must be a valid ticker (BTC-USD, etc)\");",
+											"    pm.expect(error).to.have.property(\"param\", \"ticker\");",
+											"    pm.expect(error).to.have.property(\"location\", \"params\");",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historicalFunding/{{invalidTicker}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historicalFunding",
+										"{{invalidTicker}}"
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "historical-pnl",
-					"item": []
+					"item": [
+						{
+							"name": "historical-pnl VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// parse response JSON",
+											"const jsonData = pm.response.json();",
+											"",
+											"// Check the status code",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// Define the JSON schema for the response",
+											"const schema = {",
+											"    \"type\": \"object\",",
+											"    \"required\": [\"historicalPnl\"],",
+											"    \"properties\": {",
+											"        \"historicalPnl\": {",
+											"            \"type\": \"array\",",
+											"            \"items\": {",
+											"                \"type\": \"object\",",
+											"                \"required\": [",
+											"                    \"id\", ",
+											"                    \"subaccountId\", ",
+											"                    \"equity\", ",
+											"                    \"totalPnl\", ",
+											"                    \"netTransfers\", ",
+											"                    \"createdAt\", ",
+											"                    \"blockHeight\", ",
+											"                    \"blockTime\"",
+											"                ],",
+											"                \"properties\": {",
+											"                    \"id\": { \"type\": \"string\" },",
+											"                    \"subaccountId\": { \"type\": \"string\" },",
+											"                    \"equity\": { \"type\": \"string\" },",
+											"                    \"totalPnl\": { \"type\": \"string\" },",
+											"                    \"netTransfers\": { \"type\": \"string\" },",
+											"                    \"createdAt\": { \"type\": \"string\", \"format\": \"date-time\" },",
+											"                    \"blockHeight\": { \"type\": \"string\" },",
+											"                    \"blockTime\": { \"type\": \"string\" }",
+											"                }",
+											"            }",
+											"        }",
+											"    }",
+											"};",
+											"",
+											"// Validate the response body against the schema",
+											"pm.test(\"Response schema is valid\", function () {",
+											"    pm.response.to.have.jsonSchema(schema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historical-pnl/?address={{validdYdXAddress}}&subaccountNumber={{subAccountNumber}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historical-pnl",
+										""
+									],
+									"query": [
+										{
+											"key": "address",
+											"value": "{{validdYdXAddress}}"
+										},
+										{
+											"key": "subaccountNumber",
+											"value": "{{subAccountNumber}}"
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "historical-pnl INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify response status code is 400 (adjust if a different error status is expected)",
+											"pm.test(\"Response status code is 404\", function () {",
+											"  pm.response.to.have.status(404);",
+											"});",
+											"",
+											"// 2. Check response time (threshold set to 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"  pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Validate top-level structure: Ensure response is an object with an \"errors\" array",
+											"pm.test(\"Response has 'errors' array\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  pm.expect(jsonData).to.be.an(\"object\");",
+											"  pm.expect(jsonData).to.have.property(\"errors\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Validate the schema for each error in the \"errors\" array",
+											"pm.test(\"Validate schema for each error\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  jsonData.errors.forEach((error) => {",
+											"    pm.expect(error).to.be.an(\"object\");",
+											"    pm.expect(error).to.have.property(\"msg\").that.is.a(\"string\");",
+											"  });",
+											"});",
+											"",
+											"// 5. Check that the error message includes expected text",
+											"pm.test(\"Error message contains expected text\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  // Verify that the first error message includes the expected substring",
+											"  pm.expect(jsonData.errors[0].msg).to.include(\"No subaccount found\");",
+											"});",
+											"",
+											"// 6. Validate the full response against a JSON schema",
+											"pm.test(\"Response matches expected JSON schema\", function () {",
+											"  const schema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"      errors: {",
+											"        type: \"array\",",
+											"        items: {",
+											"          type: \"object\",",
+											"          properties: {",
+											"            msg: { type: \"string\" }",
+											"          },",
+											"          required: [\"msg\"]",
+											"        }",
+											"      }",
+											"    },",
+											"    required: [\"errors\"]",
+											"  };",
+											"",
+											"  pm.response.to.have.jsonSchema(schema);",
+											"});",
+											"",
+											"// 7. Ensure no unexpected properties exist in each error object",
+											"pm.test(\"No unexpected properties in error objects\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  const expectedKeys = [\"msg\"];",
+											"  jsonData.errors.forEach((error) => {",
+											"    Object.keys(error).forEach((key) => {",
+											"      pm.expect(expectedKeys).to.include(key, `Unexpected property found in error object: ${key}`);",
+											"    });",
+											"  });",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historical-pnl/?address={{invaliddYdXAddress}}&subaccountNumber={{subAccountNumber}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historical-pnl",
+										""
+									],
+									"query": [
+										{
+											"key": "address",
+											"value": "{{invaliddYdXAddress}}"
+										},
+										{
+											"key": "subaccountNumber",
+											"value": "{{subAccountNumber}}"
+										}
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "historicalTradingRewardAggregations",
-					"item": []
+					"item": [
+						{
+							"name": "historicalTradingRewardAggregations/ VALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify response status code is 200",
+											"pm.test(\"Response status code is 200\", function () {",
+											"  pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Check response time (threshold set to 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"  pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Validate top-level structure: Ensure response is an object with a \"rewards\" array",
+											"pm.test(\"Response has 'rewards' array\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  pm.expect(jsonData).to.be.an(\"object\");",
+											"  pm.expect(jsonData).to.have.property(\"rewards\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Validate the schema for each reward in the \"rewards\" array",
+											"pm.test(\"Validate schema for each reward\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  jsonData.rewards.forEach((reward) => {",
+											"    pm.expect(reward).to.be.an(\"object\");",
+											"    pm.expect(reward).to.have.property(\"tradingReward\").that.is.a(\"string\");",
+											"    pm.expect(reward).to.have.property(\"startedAt\").that.is.a(\"string\");",
+											"    pm.expect(reward).to.have.property(\"startedAtHeight\").that.is.a(\"string\");",
+											"    // endedAt and endedAtHeight may be null or a string.",
+											"    pm.expect(reward.endedAt === null || typeof reward.endedAt === \"string\").to.be.true;",
+											"    pm.expect(reward.endedAtHeight === null || typeof reward.endedAtHeight === \"string\").to.be.true;",
+											"    pm.expect(reward).to.have.property(\"period\").that.is.a(\"string\");",
+											"  });",
+											"});",
+											"",
+											"// 5. Validate the response against a JSON schema",
+											"pm.test(\"Response matches expected JSON schema\", function () {",
+											"  const schema = {",
+											"    type: \"object\",",
+											"    properties: {",
+											"      rewards: {",
+											"        type: \"array\",",
+											"        items: {",
+											"          type: \"object\",",
+											"          properties: {",
+											"            tradingReward: { type: \"string\" },",
+											"            startedAt: { type: \"string\", format: \"date-time\" },",
+											"            startedAtHeight: { type: \"string\" },",
+											"            endedAt: { type: [\"string\", \"null\"] },",
+											"            endedAtHeight: { type: [\"string\", \"null\"] },",
+											"            period: { type: \"string\" }",
+											"          },",
+											"          required: [",
+											"            \"tradingReward\",",
+											"            \"startedAt\",",
+											"            \"startedAtHeight\",",
+											"            \"endedAt\",",
+											"            \"endedAtHeight\",",
+											"            \"period\"",
+											"          ]",
+											"        }",
+											"      }",
+											"    },",
+											"    required: [\"rewards\"]",
+											"  };",
+											"",
+											"  pm.response.to.have.jsonSchema(schema);",
+											"});",
+											"",
+											"// 6. Ensure no unexpected properties exist in each reward object",
+											"pm.test(\"No unexpected properties in reward objects\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  const expectedKeys = [\"tradingReward\", \"startedAt\", \"startedAtHeight\", \"endedAt\", \"endedAtHeight\", \"period\"];",
+											"  jsonData.rewards.forEach((reward) => {",
+											"    Object.keys(reward).forEach((key) => {",
+											"      pm.expect(expectedKeys).to.include(key, `Unexpected property found in reward: ${key}`);",
+											"    });",
+											"  });",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historicalTradingRewardAggregations/{{validdYdXAddress}}?period=DAILY",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historicalTradingRewardAggregations",
+										"{{validdYdXAddress}}"
+									],
+									"query": [
+										{
+											"key": "period",
+											"value": "DAILY"
+										}
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "historicalTradingRewardAggregations/ INVALID",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify the response status code is 200",
+											"pm.test(\"Response status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Check response time (threshold set to 6000ms)",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Validate top-level structure: Ensure response is an object with a \"rewards\" array",
+											"pm.test(\"Response has 'rewards' array\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"rewards\").that.is.an(\"array\");",
+											"});",
+											"",
+											"// 4. Validate that the rewards array is empty",
+											"pm.test(\"Rewards array is empty\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData.rewards.length).to.eql(0);",
+											"});",
+											"",
+											"// 5. Validate the full response against a JSON schema (rewards array with 0 items)",
+											"pm.test(\"Response matches expected JSON schema\", function () {",
+											"    const schema = {",
+											"        \"type\": \"object\",",
+											"        \"properties\": {",
+											"            \"rewards\": {",
+											"                \"type\": \"array\",",
+											"                \"maxItems\": 0",
+											"            }",
+											"        },",
+											"        \"required\": [\"rewards\"]",
+											"    };",
+											"    pm.response.to.have.jsonSchema(schema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/historicalTradingRewardAggregations/{{invaliddYdXAddress}}?period=DAILY",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"historicalTradingRewardAggregations",
+										"{{invaliddYdXAddress}}"
+									],
+									"query": [
+										{
+											"key": "period",
+											"value": "DAILY"
+										}
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "orderbooks",
-					"item": []
+					"item": [
+						{
+							"name": "orderbooks/perpetualMarket",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify that the response status code is 200",
+											"pm.test(\"Response status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Check that the response time is less than 6000ms",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Validate top-level structure: Ensure response is an object with non-empty \"bids\" and \"asks\" arrays",
+											"pm.test(\"Response has non-empty 'bids' and 'asks' arrays\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"bids\").that.is.an(\"array\");",
+											"    pm.expect(jsonData).to.have.property(\"asks\").that.is.an(\"array\");",
+											"    pm.expect(jsonData.bids.length).to.be.above(0);",
+											"    pm.expect(jsonData.asks.length).to.be.above(0);",
+											"});",
+											"",
+											"// 4. Validate schema for each bid in the \"bids\" array",
+											"pm.test(\"Validate schema for each bid\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    jsonData.bids.forEach(bid => {",
+											"        pm.expect(bid).to.be.an(\"object\");",
+											"        pm.expect(bid).to.have.property(\"price\").that.is.a(\"string\");",
+											"        pm.expect(bid).to.have.property(\"size\").that.is.a(\"string\");",
+											"        // Verify that price and size can be converted to numbers",
+											"        pm.expect(parseFloat(bid.price)).to.not.be.NaN;",
+											"        pm.expect(parseFloat(bid.size)).to.not.be.NaN;",
+											"    });",
+											"});",
+											"",
+											"// 5. Validate schema for each ask in the \"asks\" array",
+											"pm.test(\"Validate schema for each ask\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    jsonData.asks.forEach(ask => {",
+											"        pm.expect(ask).to.be.an(\"object\");",
+											"        pm.expect(ask).to.have.property(\"price\").that.is.a(\"string\");",
+											"        pm.expect(ask).to.have.property(\"size\").that.is.a(\"string\");",
+											"        // Verify that price and size can be converted to numbers",
+											"        pm.expect(parseFloat(ask.price)).to.not.be.NaN;",
+											"        pm.expect(parseFloat(ask.size)).to.not.be.NaN;",
+											"    });",
+											"});",
+											"",
+											"// 6. Validate the response against the full JSON schema",
+											"pm.test(\"Response matches expected JSON schema\", function () {",
+											"    const schema = {",
+											"        \"type\": \"object\",",
+											"        \"properties\": {",
+											"            \"bids\": {",
+											"                \"type\": \"array\",",
+											"                \"items\": {",
+											"                    \"type\": \"object\",",
+											"                    \"properties\": {",
+											"                        \"price\": { \"type\": \"string\" },",
+											"                        \"size\": { \"type\": \"string\" }",
+											"                    },",
+											"                    \"required\": [\"price\", \"size\"],",
+											"                    \"additionalProperties\": false",
+											"                }",
+											"            },",
+											"            \"asks\": {",
+											"                \"type\": \"array\",",
+											"                \"items\": {",
+											"                    \"type\": \"object\",",
+											"                    \"properties\": {",
+											"                        \"price\": { \"type\": \"string\" },",
+											"                        \"size\": { \"type\": \"string\" }",
+											"                    },",
+											"                    \"required\": [\"price\", \"size\"],",
+											"                    \"additionalProperties\": false",
+											"                }",
+											"            }",
+											"        },",
+											"        \"required\": [\"bids\", \"asks\"],",
+											"        \"additionalProperties\": false",
+											"    };",
+											"",
+											"    pm.response.to.have.jsonSchema(schema);",
+											"});",
+											"",
+											"// 7. Ensure no unexpected properties exist in each bid and ask object",
+											"pm.test(\"No unexpected properties in bid and ask objects\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    const expectedKeys = [\"price\", \"size\"];",
+											"    jsonData.bids.forEach(bid => {",
+											"        Object.keys(bid).forEach(key => {",
+											"            pm.expect(expectedKeys).to.include(key, `Unexpected property found in bid: ${key}`);",
+											"        });",
+											"    });",
+											"    jsonData.asks.forEach(ask => {",
+											"        Object.keys(ask).forEach(key => {",
+											"            pm.expect(expectedKeys).to.include(key, `Unexpected property found in ask: ${key}`);",
+											"        });",
+											"    });",
+											"});",
+											"",
+											"// 8. Verify that bids are sorted in descending order by price",
+											"pm.test(\"Bids are sorted in descending order\", function () {",
+											"    const bids = pm.response.json().bids;",
+											"    for (let i = 0; i < bids.length - 1; i++) {",
+											"        const currentBid = parseFloat(bids[i].price);",
+											"        const nextBid = parseFloat(bids[i+1].price);",
+											"        pm.expect(currentBid).to.be.at.least(nextBid);",
+											"    }",
+											"});",
+											"",
+											"// 9. Verify that asks are sorted in ascending order by price",
+											"pm.test(\"Asks are sorted in ascending order\", function () {",
+											"    const asks = pm.response.json().asks;",
+											"    for (let i = 0; i < asks.length - 1; i++) {",
+											"        const currentAsk = parseFloat(asks[i].price);",
+											"        const nextAsk = parseFloat(asks[i+1].price);",
+											"        pm.expect(currentAsk).to.be.at.most(nextAsk);",
+											"    }",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/orderbooks/perpetualMarket/{{ticker}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"orderbooks",
+										"perpetualMarket",
+										"{{ticker}}"
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "orders",
-					"item": []
+					"item": [
+						{
+							"name": "orders/getorder",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/orders/{{orderID}}",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"orders",
+										"{{orderID}}"
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "perpetualMarkets",
-					"item": []
+					"item": [
+						{
+							"name": "/perpetualMarkets/ListPerpetualMarkets",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify that the status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"    pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Check that the response time is less than 6000ms",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Verify the top-level structure: response must be an object with a \"markets\" object property",
+											"pm.test(\"Response has a 'markets' object\", function () {",
+											"    const jsonData = pm.response.json();",
+											"    pm.expect(jsonData).to.be.an(\"object\");",
+											"    pm.expect(jsonData).to.have.property(\"markets\");",
+											"    pm.expect(jsonData.markets).to.be.an(\"object\");",
+											"    pm.expect(Object.keys(jsonData.markets).length).to.be.above(0);",
+											"});",
+											"",
+											"// 4. Validate each market entry’s schema",
+											"pm.test(\"Each market entry has the expected properties and types\", function () {",
+											"    const markets = pm.response.json().markets;",
+											"    Object.keys(markets).forEach((marketKey) => {",
+											"        const market = markets[marketKey];",
+											"        pm.expect(market).to.be.an(\"object\");",
+											"        pm.expect(market).to.have.property(\"clobPairId\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"ticker\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"status\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"oraclePrice\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"priceChange24H\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"volume24H\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"trades24H\").that.is.a(\"number\");",
+											"        pm.expect(market).to.have.property(\"nextFundingRate\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"initialMarginFraction\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"maintenanceMarginFraction\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"openInterest\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"atomicResolution\").that.is.a(\"number\");",
+											"        pm.expect(market).to.have.property(\"quantumConversionExponent\").that.is.a(\"number\");",
+											"        pm.expect(market).to.have.property(\"tickSize\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"stepSize\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"stepBaseQuantums\").that.is.a(\"number\");",
+											"        pm.expect(market).to.have.property(\"subticksPerTick\").that.is.a(\"number\");",
+											"        pm.expect(market).to.have.property(\"marketType\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"openInterestLowerCap\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"openInterestUpperCap\").that.is.a(\"string\");",
+											"        pm.expect(market).to.have.property(\"baseOpenInterest\").that.is.a(\"string\");",
+											"        // defaultFundingRate1H may sometimes be null (if applicable) so we allow string or null",
+											"        pm.expect(market).to.have.property(\"defaultFundingRate1H\").that.satisfies(val => (typeof val === \"string\" || val === null));",
+											"    });",
+											"});",
+											"",
+											"// 5. Validate the response against a JSON schema",
+											"pm.test(\"Response matches the expected JSON schema\", function () {",
+											"    const schema = {",
+											"        type: \"object\",",
+											"        properties: {",
+											"            markets: {",
+											"                type: \"object\",",
+											"                patternProperties: {",
+											"                    \".*\": {",
+											"                        type: \"object\",",
+											"                        properties: {",
+											"                            clobPairId: { type: \"string\" },",
+											"                            ticker: { type: \"string\" },",
+											"                            status: { type: \"string\" },",
+											"                            oraclePrice: { type: \"string\" },",
+											"                            priceChange24H: { type: \"string\" },",
+											"                            volume24H: { type: \"string\" },",
+											"                            trades24H: { type: \"number\" },",
+											"                            nextFundingRate: { type: \"string\" },",
+											"                            initialMarginFraction: { type: \"string\" },",
+											"                            maintenanceMarginFraction: { type: \"string\" },",
+											"                            openInterest: { type: \"string\" },",
+											"                            atomicResolution: { type: \"number\" },",
+											"                            quantumConversionExponent: { type: \"number\" },",
+											"                            tickSize: { type: \"string\" },",
+											"                            stepSize: { type: \"string\" },",
+											"                            stepBaseQuantums: { type: \"number\" },",
+											"                            subticksPerTick: { type: \"number\" },",
+											"                            marketType: { type: \"string\" },",
+											"                            openInterestLowerCap: { type: \"string\" },",
+											"                            openInterestUpperCap: { type: \"string\" },",
+											"                            baseOpenInterest: { type: \"string\" },",
+											"                            defaultFundingRate1H: { type: [\"string\", \"null\"] }",
+											"                        },",
+											"                        required: [",
+											"                            \"clobPairId\",",
+											"                            \"ticker\",",
+											"                            \"status\",",
+											"                            \"oraclePrice\",",
+											"                            \"priceChange24H\",",
+											"                            \"volume24H\",",
+											"                            \"trades24H\",",
+											"                            \"nextFundingRate\",",
+											"                            \"initialMarginFraction\",",
+											"                            \"maintenanceMarginFraction\",",
+											"                            \"openInterest\",",
+											"                            \"atomicResolution\",",
+											"                            \"quantumConversionExponent\",",
+											"                            \"tickSize\",",
+											"                            \"stepSize\",",
+											"                            \"stepBaseQuantums\",",
+											"                            \"subticksPerTick\",",
+											"                            \"marketType\",",
+											"                            \"openInterestLowerCap\",",
+											"                            \"openInterestUpperCap\",",
+											"                            \"baseOpenInterest\",",
+											"                            \"defaultFundingRate1H\"",
+											"                        ],",
+											"                        additionalProperties: false",
+											"                    }",
+											"                },",
+											"                additionalProperties: false",
+											"            }",
+											"        },",
+											"        required: [\"markets\"],",
+											"        additionalProperties: false",
+											"    };",
+											"",
+											"    pm.response.to.have.jsonSchema(schema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/perpetualMarkets/",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"perpetualMarkets",
+										""
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
 					"name": "perpetualPositions",
 					"item": []
 				},
 				{
-					"name": "trader",
-					"item": []
+					"name": "sparklines",
+					"item": [
+						{
+							"name": "sparklines",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"// 1. Verify that the status code is 200",
+											"pm.test(\"Status code is 200\", function () {",
+											"  pm.response.to.have.status(200);",
+											"});",
+											"",
+											"// 2. Verify that the response time is less than 6000ms",
+											"pm.test(\"Response time is less than 6000ms\", function () {",
+											"  pm.expect(pm.response.responseTime).to.be.below(6000);",
+											"});",
+											"",
+											"// 3. Verify that the response is an object and that each property is an array",
+											"pm.test(\"Response is an object with sparkline arrays\", function () {",
+											"  const jsonData = pm.response.json();",
+											"  pm.expect(jsonData).to.be.an(\"object\");",
+											"  Object.keys(jsonData).forEach((key) => {",
+											"    pm.expect(jsonData[key]).to.be.an(\"array\");",
+											"  });",
+											"});",
+											"",
+											"// 4. Validate that each sparkline array contains only string values (which represent numbers)",
+											"pm.test(\"Each sparkline array contains string values\", function () {",
+											"  const data = pm.response.json();",
+											"  Object.keys(data).forEach((key) => {",
+											"    data[key].forEach((value) => {",
+											"      pm.expect(value).to.be.a(\"string\");",
+											"      // Optionally, verify that the string can be converted to a valid number:",
+											"      pm.expect(parseFloat(value)).to.be.a(\"number\");",
+											"    });",
+											"  });",
+											"});",
+											"",
+											"// 5. Validate the response against a JSON schema",
+											"pm.test(\"Response matches the expected JSON schema\", function () {",
+											"  const schema = {",
+											"    type: \"object\",",
+											"    patternProperties: {",
+											"      \".*\": {",
+											"        type: \"array\",",
+											"        items: { type: \"string\" }",
+											"      }",
+											"    },",
+											"    additionalProperties: false",
+											"  };",
+											"  pm.response.to.have.jsonSchema(schema);",
+											"});",
+											""
+										],
+										"type": "text/javascript",
+										"packages": {}
+									}
+								}
+							],
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{indexerBaseUrl}}/sparklines/?timePeriod=ONE_DAY",
+									"host": [
+										"{{indexerBaseUrl}}"
+									],
+									"path": [
+										"sparklines",
+										""
+									],
+									"query": [
+										{
+											"key": "timePeriod",
+											"value": "ONE_DAY"
+										}
+									]
+								}
+							},
+							"response": []
+						}
+					]
 				},
 				{
-					"name": "sparklines",
+					"name": "trader",
 					"item": []
 				},
 				{
