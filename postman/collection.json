@@ -4,7 +4,7 @@
 		"name": "dYdX",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "41849022",
-		"_collection_link": "https://dydx-ops-services.postman.co/workspace/dYdX~fdeed7e0-d6ed-46c3-926d-fdf269d648ad/collection/41849022-981cef60-dcd2-4b5e-aefb-c7d1dd2e08dc?action=share&source=collection_link&creator=41849022"
+		"_collection_link": "https://dydx-ops-services.postman.co/workspace/fdeed7e0-d6ed-46c3-926d-fdf269d648ad/collection/41849022-981cef60-dcd2-4b5e-aefb-c7d1dd2e08dc?action=share&source=collection_link&creator=41849022"
 	},
 	"item": [
 		{
@@ -970,15 +970,11 @@
 										"method": "GET",
 										"header": [],
 										"url": {
-											"raw": "https://indexer.dydx.trade/v4/affiliates/snapshot?addressFilter[]={{dydxWithReferrals}}&addressFilter[]={{dydxWithReferrals2}}&offset=0&limit=1",
-											"protocol": "https",
+											"raw": "{{indexerBaseUrl}}/affiliates/snapshot?addressFilter[]={{dydxWithReferrals}}&addressFilter[]={{dydxWithReferrals2}}&offset=0&limit=1",
 											"host": [
-												"indexer",
-												"dydx",
-												"trade"
+												"{{indexerBaseUrl}}"
 											],
 											"path": [
-												"v4",
 												"affiliates",
 												"snapshot"
 											],
@@ -1076,15 +1072,11 @@
 										"method": "GET",
 										"header": [],
 										"url": {
-											"raw": "https://indexer.dydx.trade/v4/affiliates/snapshot?addressFilter[]={{dydxWithReferrals}}&addressFilter[]={{dydxWithReferrals2}}&offset=0&limit=0",
-											"protocol": "https",
+											"raw": "{{indexerBaseUrl}}/affiliates/snapshot?addressFilter[]={{dydxWithReferrals}}&addressFilter[]={{dydxWithReferrals2}}&offset=0&limit=0",
 											"host": [
-												"indexer",
-												"dydx",
-												"trade"
+												"{{indexerBaseUrl}}"
 											],
 											"path": [
-												"v4",
 												"affiliates",
 												"snapshot"
 											],
@@ -1173,15 +1165,11 @@
 										"method": "GET",
 										"header": [],
 										"url": {
-											"raw": "https://indexer.dydx.trade/v4/affiliates/snapshot?addressFilter[]={{dydxWithReferrals}}&addressFilter[]={{dydxWithReferrals2}}&offset=0&limit=3",
-											"protocol": "https",
+											"raw": "{{indexerBaseUrl}}/affiliates/snapshot?addressFilter[]={{dydxWithReferrals}}&addressFilter[]={{dydxWithReferrals2}}&offset=0&limit=3",
 											"host": [
-												"indexer",
-												"dydx",
-												"trade"
+												"{{indexerBaseUrl}}"
 											],
 											"path": [
-												"v4",
 												"affiliates",
 												"snapshot"
 											],
@@ -1301,12 +1289,33 @@
 					"item": []
 				},
 				{
-					"name": "screen",
-					"item": []
-				},
-				{
 					"name": "compliance",
-					"item": []
+					"item": [
+						{
+							"name": "screen",
+							"item": [
+								{
+									"name": "screen/",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{indexerBaseUrl}}/compliance/screen/{{validdYdXAddress}}",
+											"host": [
+												"{{indexerBaseUrl}}"
+											],
+											"path": [
+												"compliance",
+												"screen",
+												"{{validdYdXAddress}}"
+											]
+										}
+									},
+									"response": []
+								}
+							]
+						}
+					]
 				},
 				{
 					"name": "fills",
