@@ -16,7 +16,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      # 1. Checkout the repo so we can read/write the state file.
+      # 1. Checkout the repository.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -85,7 +85,18 @@ jobs:
       - name: Show skip flag (for debugging)
         run: echo "skip = ${{ steps.check-tests.outputs.skip }}"
 
-      # --- Steps below only run if tests are not skipped ---
+      # 5. If tests are to run, update the stored upstream run ID immediately.
+      - name: Update Last Processed Upstream Run ID
+        if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
+        run: |
+          echo "${{ steps.get-run.outputs.run_id }}" > .last_upstream_run_id.txt
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .last_upstream_run_id.txt
+          git commit -m "[skip ci] Update last processed upstream run id to ${{ steps.get-run.outputs.run_id }}"
+          git push
+
+      # 6. (If tests are not skipped) Install Newman and configure NordLayer (VPN)
       - name: Install Newman and NordLayer dependencies
         if: steps.check-tests.outputs.skip == 'false'
         run: |
@@ -116,6 +127,7 @@ jobs:
           echo "Verifying VPN IP..."
           curl ifconfig.me
 
+      # 7. Run Newman Tests
       - name: Run Newman Tests for Testnet
         if: steps.check-tests.outputs.skip == 'false'
         run: |
@@ -135,31 +147,22 @@ jobs:
         if: steps.check-tests.outputs.skip == 'true'
         run: echo "Tests were skipped because the upstream deployment has not changed."
 
-      - name: Update Last Processed Upstream Run ID
-        if: steps.check-tests.outputs.skip == 'false'
-        run: |
-          echo "${{ steps.get-run.outputs.run_id }}" > .last_upstream_run_id.txt
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add .last_upstream_run_id.txt
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ steps.get-run.outputs.run_id }}"
-          git push
-
-      # --- Artifact Upload and Notifications (always run) ---
+      # 8. Upload artifacts (always run so you can download reports even if tests fail)
       - name: Upload Test Results (JUnit XML)
         if: always()
-        uses: actions/upload-artifact@v4.6.0
+        uses: actions/upload-artifact@v4
         with:
           name: postman-test-results
           path: results.xml
 
       - name: Upload HTML Report (Nice UI)
         if: always()
-        uses: actions/upload-artifact@v4.6.0
+        uses: actions/upload-artifact@v4
         with:
           name: postman-html-report
           path: newman-report.html
 
+      # 9. Notify Slack Channel (only if tests ran)
       - name: Notify Slack Channel
         if: steps.check-tests.outputs.skip == 'false'
         env:
