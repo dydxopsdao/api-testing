@@ -134,7 +134,6 @@ jobs:
         if: ${{ steps.check-tests.outputs.skip == 'false' }}
         id: newman
         run: |
-          # Run Newman without appending "|| true" so we can capture its exit code.
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
             --reporters cli,htmlextra,junit \
@@ -165,11 +164,10 @@ jobs:
           name: postman-html-report
           path: newman-report.html
 
-      # 12. Notify Slack with the test results (always run).
+      # 12. Notify Slack Channel only if tests ran.
       - name: Notify Slack Channel
-        if: always()
+        if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
         run: |
-          # Use the exit code from the Newman step (default to 0 if tests were skipped).
           NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code || 0 }}"
           if [ "$NEWMAN_EXIT_CODE" -eq 0 ]; then
             COLOR="good"
@@ -193,7 +191,7 @@ jobs:
 
       # 13. Final step: fail the workflow if Newman tests failed.
       - name: Fail workflow if Newman tests failed
-        if: always() && ${{ steps.check-tests.outputs.skip == 'false' }}
+        if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
         run: |
           NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code || 0 }}"
           if [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
