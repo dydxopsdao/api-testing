@@ -55,9 +55,39 @@
 			"value": "dydx1cew7z78590202eujzr799da2p2c5ssq7ahhxze",
 			"type": "default",
 			"enabled": true
+		},
+		{
+			"key": "ticker",
+			"value": "",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "invalidTicker",
+			"value": "!!!-!!!",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "subAccountNumber",
+			"value": "",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "validOrderID",
+			"value": "",
+			"type": "default",
+			"enabled": true
+		},
+		{
+			"key": "inValidOrderID",
+			"value": "",
+			"type": "default",
+			"enabled": true
 		}
 	],
 	"_postman_variable_scope": "environment",
-	"_postman_exported_at": "2025-02-14T13:45:17.749Z",
-	"_postman_exported_using": "Postman/11.32.2"
+	"_postman_exported_at": "2025-02-18T10:09:15.398Z",
+	"_postman_exported_using": "Postman/11.33.0"
 }
