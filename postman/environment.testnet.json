@@ -34,13 +34,13 @@
 		},
 		{
 			"key": "referralCode",
-			"value": "",
+			"value": "UpperJamX3B",
 			"type": "any",
 			"enabled": true
 		},
 		{
 			"key": "invalidReferralCode",
-			"value": "",
+			"value": "1",
 			"type": "default",
 			"enabled": true
 		},
@@ -58,7 +58,7 @@
 		},
 		{
 			"key": "ticker",
-			"value": "",
+			"value": "BTC-USD",
 			"type": "default",
 			"enabled": true
 		},
@@ -70,24 +70,24 @@
 		},
 		{
 			"key": "subAccountNumber",
-			"value": "",
+			"value": "0",
 			"type": "default",
 			"enabled": true
 		},
 		{
 			"key": "validOrderID",
-			"value": "",
+			"value": "fb308675-14d8-5035-9660-e1f32eec9fe1",
 			"type": "default",
 			"enabled": true
 		},
 		{
 			"key": "inValidOrderID",
-			"value": "",
+			"value": "1",
 			"type": "default",
 			"enabled": true
 		}
 	],
 	"_postman_variable_scope": "environment",
-	"_postman_exported_at": "2025-02-18T10:09:15.398Z",
+	"_postman_exported_at": "2025-02-18T11:10:26.370Z",
 	"_postman_exported_using": "Postman/11.33.0"
 }
