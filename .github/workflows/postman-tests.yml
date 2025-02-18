@@ -1,14 +1,8 @@
-name: Newman Tests with NordLayer VPN (Testnet)
+name: Run Newman Tests with NordLayer VPN (Testnet)
 
 on:
-  workflow_dispatch:
-    inputs:
-      override-commit-check:
-        description: "Run tests regardless of upstream deployment change"
-        required: false
-        default: "false"
-  schedule:
-    - cron: "*/15 * * * *"
+  repository_dispatch:
+    types: [run-tests]
 
 jobs:
   run-tests:
@@ -16,90 +10,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      # 1. Checkout the repository.
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           persist-credentials: true
 
-      # 2. Get the last processed upstream run ID.
-      - name: Get Last Processed Upstream Run ID
-        id: last-run
-        run: |
-          if [ -f .last_upstream_run_id.txt ]; then
-            cat .last_upstream_run_id.txt
-          else
-            echo "none"
-          fi > last_run_id.txt
-          LAST_RUN=$(cat last_run_id.txt)
-          echo "Last processed upstream run id: $LAST_RUN"
-          echo "LAST_RUN_ID=$LAST_RUN" >> $GITHUB_ENV
-
-      # 3. Query the upstream repo for the latest testnet deployment run ID.
-      - name: Get Latest Upstream Run ID
-        id: get-run
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const owner = "dydxprotocol";
-            const repo = "v4-chain";
-            const workflowFile = "indexer-build-and-push-testnet.yml"; // adjust if needed
-            const { data: runs } = await github.rest.actions.listWorkflowRuns({
-              owner,
-              repo,
-              workflow_id: workflowFile,
-              status: "completed",
-              per_page: 1
-            });
-            if (runs.total_count > 0) {
-              const latestRun = runs.workflow_runs[0];
-              core.setOutput("run_id", latestRun.id.toString());
-              console.log("Latest upstream run id: " + latestRun.id.toString());
-            } else {
-              core.setOutput("run_id", "none");
-              console.log("No upstream workflow run found.");
-            }
-
-      # 4. Determine if tests should run.
-      - name: Determine if tests should run
-        id: check-tests
-        run: |
-          LAST_RUN_ID="${LAST_RUN_ID:-none}"
-          NEW_RUN_ID="${{ steps.get-run.outputs.run_id }}"
-          echo "Last processed upstream run id: $LAST_RUN_ID"
-          echo "Latest upstream run id: $NEW_RUN_ID"
-          OVERRIDE="${{ github.event.inputs.override-commit-check }}"
-          if [ "$OVERRIDE" = "true" ]; then
-            echo "Override provided, will run tests."
-            echo "skip=false" >> $GITHUB_OUTPUT
-          else
-            if [ "$LAST_RUN_ID" = "$NEW_RUN_ID" ]; then
-              echo "Upstream run id has not changed. Skipping tests."
-              echo "skip=true" >> $GITHUB_OUTPUT
-            else
-              echo "New upstream run id detected. Will run tests."
-              echo "skip=false" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-      - name: Show skip flag (for debugging)
-        run: echo "skip = ${{ steps.check-tests.outputs.skip }}"
-
-      # 5. If tests are to run, update the stored upstream run ID immediately.
       - name: Update Last Processed Upstream Run ID
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
-          echo "${{ steps.get-run.outputs.run_id }}" > .last_upstream_run_id.txt
+          echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
           rm -f last_run_id.txt
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add .last_upstream_run_id.txt
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ steps.get-run.outputs.run_id }}" || echo "No changes to commit."
+          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
           git push
 
-      # 6. Install Newman, NordLayer, and Datadog CI CLI dependencies.
       - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
           npm install -g newman newman-reporter-htmlextra
           sudo apt-get update
@@ -115,15 +41,11 @@ jobs:
           sudo chmod 666 /run/nordlayer/nordlayer.sock
           npm install -g @datadog/datadog-ci
 
-      # 7. Log in to NordLayer VPN.
       - name: Login to NordLayer VPN
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
           nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"
 
-      # 8. Connect to the VPN.
       - name: Connect to NordLayer VPN
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
           nordlayer gateways
           nordlayer connect "dos-server-BQG2cKQV"
@@ -131,9 +53,7 @@ jobs:
           echo "Verifying VPN IP..."
           curl ifconfig.me
 
-      # 9. Run Newman tests and capture the exit code.
       - name: Run Newman Tests for Testnet
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         id: newman
         run: |
           newman run postman/collection.json \
@@ -145,39 +65,31 @@ jobs:
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
         continue-on-error: true
 
-      # 10. Disconnect from the VPN.
       - name: Disconnect from NordLayer VPN
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
           nordlayer status || true
           nordlayer disconnect || echo "Already disconnected"
 
-      # 11. Upload test results to Datadog.
       - name: Upload Test Results to Datadog
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: datadog-ci junit upload results.xml --service "indexer-api-testing"
         env:
           DD_API_KEY: ${{ secrets.DD_API_KEY }}
           DD_SITE: ap1.datadoghq.com
 
-      # 12. Upload artifacts only if tests ran.
       - name: Upload Test Results (JUnit XML)
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-test-results
           path: results.xml
 
       - name: Upload HTML Report (Nice UI)
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-html-report
           path: newman-report.html
 
-      # 13. Notify Slack Channel only if tests were run.
       - name: Notify Slack Channel
-        if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
+        if: always()
         run: |
           NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code || 0 }}"
           if [ "$NEWMAN_EXIT_CODE" -eq 0 ]; then
@@ -200,9 +112,8 @@ jobs:
           echo "$PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-      # 14. Fail the workflow if Newman tests failed.
       - name: Fail workflow if Newman tests failed
-        if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
+        if: always()
         run: |
           NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code || 0 }}"
           if [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
