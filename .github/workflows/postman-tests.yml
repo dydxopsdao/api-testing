@@ -59,6 +59,7 @@ jobs:
               core.setOutput("run_id", "none");
               console.log("No upstream workflow run found.");
             }
+
       # 4. Compare the latest upstream run ID to the stored one.
       - name: Determine if tests should run
         id: check-tests
@@ -84,12 +85,11 @@ jobs:
       - name: Show skip flag (for debugging)
         run: echo "skip = ${{ steps.check-tests.outputs.skip }}"
 
-      # 5. Run Newman tests (only if upstream is new or overridden)
-      - name: Run Newman Tests for Testnet
+      # --- Steps below only run if tests are not skipped ---
+      - name: Install Newman and NordLayer dependencies
         if: steps.check-tests.outputs.skip == 'false'
         run: |
           npm install -g newman newman-reporter-htmlextra
-          # Install & configure NordLayer
           sudo apt-get update
           sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
           sudo apt-get install -f -y
@@ -102,18 +102,32 @@ jobs:
           sudo chmod 755 /run/nordlayer
           sudo chmod 666 /run/nordlayer/nordlayer.sock
 
+      - name: Login to NordLayer VPN
+        if: steps.check-tests.outputs.skip == 'false'
+        run: |
           nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"
+
+      - name: Connect to NordLayer VPN
+        if: steps.check-tests.outputs.skip == 'false'
+        run: |
           nordlayer gateways
           nordlayer connect "dos-server-BQG2cKQV"
+          sleep 20
           echo "Verifying VPN IP..."
           curl ifconfig.me
 
+      - name: Run Newman Tests for Testnet
+        if: steps.check-tests.outputs.skip == 'false'
+        run: |
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
             --reporters cli,htmlextra,junit \
             --reporter-htmlextra-export newman-report.html \
-            --reporter-junit-export results.xml
+            --reporter-junit-export results.xml || true
 
+      - name: Disconnect from NordLayer VPN
+        if: steps.check-tests.outputs.skip == 'false'
+        run: |
           nordlayer status || true
           nordlayer disconnect || echo "Already disconnected"
 
@@ -121,7 +135,6 @@ jobs:
         if: steps.check-tests.outputs.skip == 'true'
         run: echo "Tests were skipped because the upstream deployment has not changed."
 
-      # 6. If tests ran, update the stored upstream run ID.
       - name: Update Last Processed Upstream Run ID
         if: steps.check-tests.outputs.skip == 'false'
         run: |
@@ -132,22 +145,21 @@ jobs:
           git commit -m "[skip ci] Update last processed upstream run id to ${{ steps.get-run.outputs.run_id }}"
           git push
 
-      # 7. Upload test artifacts (only if tests ran)
+      # --- Artifact Upload and Notifications (always run) ---
       - name: Upload Test Results (JUnit XML)
-        if: steps.check-tests.outputs.skip == 'false'
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-test-results
           path: results.xml
 
       - name: Upload HTML Report (Nice UI)
-        if: steps.check-tests.outputs.skip == 'false'
-        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-html-report
           path: newman-report.html
 
-      # 8. Notify Slack Channel only if tests ran.
       - name: Notify Slack Channel
         if: steps.check-tests.outputs.skip == 'false'
         env:
