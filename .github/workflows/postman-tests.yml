@@ -96,8 +96,8 @@ jobs:
           git commit -m "[skip ci] Update last processed upstream run id to ${{ steps.get-run.outputs.run_id }}"
           git push
 
-      # 6. Install Newman and NordLayer dependencies.
-      - name: Install Newman and NordLayer dependencies
+      # 6. Install Newman, NordLayer, and Datadog CI CLI dependencies.
+      - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
         if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
           npm install -g newman newman-reporter-htmlextra
@@ -112,10 +112,6 @@ jobs:
           sudo chown -R runner:runner /run/nordlayer/
           sudo chmod 755 /run/nordlayer
           sudo chmod 666 /run/nordlayer/nordlayer.sock
-
-      - name: Install Datadog CI CLI
-        if: ${{ steps.check-tests.outputs.skip == 'false' }}
-        run: |
           npm install -g @datadog/datadog-ci
 
       # 7. Log in to NordLayer VPN.
@@ -144,9 +140,9 @@ jobs:
             --reporters cli,htmlextra,junit \
             --reporter-htmlextra-export newman-report.html \
             --reporter-junit-export results.xml
-          echo "exit_code=$(echo $?)" >> $GITHUB_OUTPUT
+          NEWMAN_EXIT_CODE=$?
+          echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
         continue-on-error: true
-
 
       # 10. Disconnect from the VPN.
       - name: Disconnect from NordLayer VPN
@@ -155,29 +151,30 @@ jobs:
           nordlayer status || true
           nordlayer disconnect || echo "Already disconnected"
 
+      # 11. Upload test results to Datadog.
       - name: Upload Test Results to Datadog
-        if: always()
+        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: datadog-ci junit upload results.xml
         env:
           DD_API_KEY: ${{ secrets.DD_API_KEY }}
           DD_SITE: ap1.datadoghq.com
 
-      # 11. Upload artifacts (always run so you can download reports even if tests fail).
+      # 12. Upload artifacts only if tests ran.
       - name: Upload Test Results (JUnit XML)
-        if: always()
+        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: postman-test-results
           path: results.xml
 
       - name: Upload HTML Report (Nice UI)
-        if: always()
+        if: ${{ steps.check-tests.outputs.skip == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: postman-html-report
           path: newman-report.html
 
-      # 12. Notify Slack Channel only if tests ran.
+      # 13. Notify Slack Channel only if tests were run.
       - name: Notify Slack Channel
         if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
         run: |
@@ -202,7 +199,7 @@ jobs:
           echo "$PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-      # 13. Final step: fail the workflow if Newman tests failed.
+      # 14. Fail the workflow if Newman tests failed.
       - name: Fail workflow if Newman tests failed
         if: ${{ always() && steps.check-tests.outputs.skip == 'false' }}
         run: |
