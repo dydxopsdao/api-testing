@@ -113,6 +113,11 @@ jobs:
           sudo chmod 755 /run/nordlayer
           sudo chmod 666 /run/nordlayer/nordlayer.sock
 
+      - name: Install Datadog CI CLI
+        if: ${{ steps.check-tests.outputs.skip == 'false' }}
+        run: |
+          npm install -g @datadog/datadog-ci
+
       # 7. Log in to NordLayer VPN.
       - name: Login to NordLayer VPN
         if: ${{ steps.check-tests.outputs.skip == 'false' }}
@@ -142,12 +147,20 @@ jobs:
           echo "exit_code=$(echo $?)" >> $GITHUB_OUTPUT
         continue-on-error: true
 
+
       # 10. Disconnect from the VPN.
       - name: Disconnect from NordLayer VPN
         if: ${{ steps.check-tests.outputs.skip == 'false' }}
         run: |
           nordlayer status || true
           nordlayer disconnect || echo "Already disconnected"
+
+      - name: Upload Test Results to Datadog
+        if: always()
+        run: datadog-ci junit upload results.xml
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SITE: ap1.datadoghq.com
 
       # 11. Upload artifacts (always run so you can download reports even if tests fail).
       - name: Upload Test Results (JUnit XML)
