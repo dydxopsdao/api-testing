@@ -1,0 +1,85 @@
+name: Check if new Testnet Indexer has been deployed
+
+on:
+  workflow_dispatch:
+    inputs:
+      override-commit-check:
+        description: "Run tests regardless of upstream deployment change"
+        required: false
+        default: "false"
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Get Last Processed Upstream Run ID
+        id: last-run
+        run: |
+          if [ -f .last_upstream_run_id.txt ]; then
+            cat .last_upstream_run_id.txt
+          else
+            echo "none"
+          fi > last_run_id.txt
+          LAST_RUN=$(cat last_run_id.txt)
+          echo "Last processed upstream run id: $LAST_RUN"
+          echo "LAST_RUN_ID=$LAST_RUN" >> $GITHUB_ENV
+
+      - name: Get Latest Upstream Run ID
+        id: get-run
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = "dydxprotocol";
+            const repo = "v4-chain";
+            const workflowFile = "indexer-build-and-push-testnet.yml"; // adjust if needed
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: workflowFile,
+              status: "completed",
+              per_page: 1
+            });
+            if (runs.total_count > 0) {
+              const latestRun = runs.workflow_runs[0];
+              core.setOutput("run_id", latestRun.id.toString());
+              console.log("Latest upstream run id: " + latestRun.id.toString());
+            } else {
+              core.setOutput("run_id", "none");
+              console.log("No upstream workflow run found.");
+            }
+
+      - name: Determine if tests should run
+        id: determine
+        run: |
+          LAST_RUN_ID="${LAST_RUN_ID:-none}"
+          NEW_RUN_ID="${{ steps.get-run.outputs.run_id }}"
+          echo "Last processed upstream run id: $LAST_RUN_ID"
+          echo "Latest upstream run id: $NEW_RUN_ID"
+          OVERRIDE="${{ github.event.inputs.override-commit-check }}"
+          if [ "$OVERRIDE" = "true" ]; then
+            echo "Override provided, will run tests."
+            echo "run_tests=true" >> $GITHUB_OUTPUT
+          else
+            if [ "$LAST_RUN_ID" = "$NEW_RUN_ID" ]; then
+              echo "Upstream run id has not changed. Skipping tests."
+              echo "run_tests=false" >> $GITHUB_OUTPUT
+            else
+              echo "New upstream run id detected. Will run tests."
+              echo "run_tests=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Trigger Tests Workflow if Necessary
+        if: steps.determine.outputs.run_tests == 'true'
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: run-tests
+          client-payload: '{"run_id": "${{ steps.get-run.outputs.run_id }}"}'
