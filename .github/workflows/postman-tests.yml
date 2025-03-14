@@ -70,11 +70,11 @@ jobs:
           nordlayer status || true
           nordlayer disconnect || echo "Already disconnected"
 
-      - name: Upload Test Results to Datadog
-        run: datadog-ci junit upload results.xml --service "indexer-api-testing"
-        env:
-          DD_API_KEY: ${{ secrets.DD_API_KEY }}
-          DD_SITE: ap1.datadoghq.com
+      # - name: Upload Test Results to Datadog
+      #   run: datadog-ci junit upload results.xml --service "indexer-api-testing"
+      #   env:
+      #     DD_API_KEY: ${{ secrets.DD_API_KEY }}
+      #     DD_SITE: ap1.datadoghq.com
 
       - name: Upload Test Results (JUnit XML)
         uses: actions/upload-artifact@v4.6.0
