@@ -4,7 +4,7 @@
 		"name": "dYdX",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "41849022",
-		"_collection_link": "https://dydx-ops-services.postman.co/workspace/fdeed7e0-d6ed-46c3-926d-fdf269d648ad/collection/41849022-981cef60-dcd2-4b5e-aefb-c7d1dd2e08dc?action=share&source=collection_link&creator=41849022"
+		"_collection_link": "https://dydx-ops-services.postman.co/workspace/dYdX~fdeed7e0-d6ed-46c3-926d-fdf269d648ad/collection/41849022-981cef60-dcd2-4b5e-aefb-c7d1dd2e08dc?action=share&source=collection_link&creator=41849022"
 	},
 	"item": [
 		{
@@ -2024,24 +2024,6 @@
 									"response": []
 								}
 							]
-						},
-						{
-							"name": "geoblock",
-							"request": {
-								"method": "POST",
-								"header": [],
-								"url": {
-									"raw": "{{indexerBaseUrl}}/compliance/geoblock",
-									"host": [
-										"{{indexerBaseUrl}}"
-									],
-									"path": [
-										"compliance",
-										"geoblock"
-									]
-								}
-							},
-							"response": []
 						}
 					]
 				},
@@ -2478,7 +2460,6 @@
 									"listen": "test",
 									"script": {
 										"exec": [
-											"// Check that the response status is 200",
 											"pm.test(\"Status code is 200\", function () {",
 											"    pm.response.to.have.status(200);",
 											"});",
@@ -2513,6 +2494,15 @@
 											"            pm.expect(effectiveAtTime, \"effectiveAt of item \" + index + \" should be a valid date\").to.be.a(\"number\");",
 											"            pm.expect(effectiveAtTime, \"effectiveAt of item \" + index + \" should be a valid timestamp\").to.be.above(0);",
 											"        });",
+											"    });",
+											"",
+											"    // New test: Ensure that not every funding rate is 0",
+											"    pm.test(\"At least one funding rate is non-zero\", function () {",
+											"        // Check that not all funding items have a rate equal to 0",
+											"        var allRatesZero = jsonData.historicalFunding.every(function(item) {",
+											"            return parseFloat(item.rate) === 0;",
+											"        });",
+											"        pm.expect(allRatesZero, \"All funding rates are zero\").to.be.false;",
 											"    });",
 											"}",
 											""
