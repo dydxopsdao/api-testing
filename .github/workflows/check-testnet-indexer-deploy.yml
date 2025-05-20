@@ -80,6 +80,6 @@ jobs:
         if: steps.determine.outputs.run_tests == 'true'
         uses: peter-evans/repository-dispatch@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TRIGGER_TARGET }}
           event-type: run-tests
           client-payload: '{"run_id": "${{ steps.get-run.outputs.run_id }}"}'
