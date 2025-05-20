@@ -6,7 +6,7 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-22.04 
+    runs-on: ubuntu-22.04 # Using Ubuntu 22.04 as it works for service start
     permissions:
       contents: write
     steps:
@@ -25,12 +25,12 @@ jobs:
           git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
           git push
 
-      - name: Install Dependencies (Newman, NordLayer)
+      - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
         run: |
-          npm install -g newman newman-reporter-htmlextra
+          npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
 
           echo "System Info:"
-          lsb_release -a
+          lsb_release -a # No LSB modules is fine, other info is present
           uname -m
 
           echo "Attempting to set up NordLayer repository..."
@@ -41,7 +41,7 @@ jobs:
             echo "Contents of /etc/apt/sources.list.d/nordlayer.list:"
             cat /etc/apt/sources.list.d/nordlayer.list
           else
-            echo "ERROR: /etc/apt/sources.list.d/nordlayer.list was NOT created by dpkg -i."
+            echo "ERROR: /etc/apt/sources.list.d/nordlayer.list was NOT created."
             exit 1
           fi
           sudo rm /tmp/nordlayer-repo-setup.deb
@@ -77,7 +77,7 @@ jobs:
           timeout 60s bash -c 'until systemctl is-active --quiet nordlayer.service; do echo "Waiting for nordlayer.service (PID: $(systemctl show -p MainPID nordlayer.service | cut -d= -f2))..."; sleep 3; done'
           
           if ! systemctl is-active --quiet nordlayer.service; then
-            echo "ERROR: NordLayer service did not become active after 'enable --now' and waiting."
+            echo "ERROR: NordLayer service did not become active."
             echo "--- Status of nordlayer.service (after timeout) ---"
             sudo systemctl status nordlayer.service --no-pager
             echo "--- Journal for nordlayer.service (last 100 lines, after timeout) ---"
@@ -86,45 +86,75 @@ jobs:
           fi
           echo "NordLayer service is active."
           
-          echo "Setting permissions for NordLayer socket..."
-          if [ -d "/run/nordlayer/" ]; then
-              echo "Current permissions for /run/nordlayer/ directory:"
-              sudo ls -ld /run/nordlayer/
+          SOCKET_PATH="/run/nordlayer/nordlayer.sock"
+          SOCKET_DIR="/run/nordlayer/"
+
+          echo "Setting permissions for NordLayer..."
+
+          if getent group nordlayer > /dev/null; then
+            echo "Adding runner user to 'nordlayer' group..."
+            sudo usermod -a -G nordlayer $(whoami) # Use $(whoami) for current user (runner)
+            echo "Runner user is: $(whoami)"
+            echo "Runner groups after adding to nordlayer:"
+            groups # Verify for current user
+          else
+            echo "Group 'nordlayer' does not exist. This might be an issue."
+          fi
+          
+          # Brief pause for group membership to potentially propagate
+          sleep 1
+
+          if [ -d "$SOCKET_DIR" ]; then
+              echo "Directory $SOCKET_DIR exists."
+              echo "Current permissions for $SOCKET_DIR directory:"
+              sudo ls -ld "$SOCKET_DIR"
               
-              if [ -S "/run/nordlayer/nordlayer.sock" ]; then
-                  echo "Found socket /run/nordlayer/nordlayer.sock. Changing ownership to runner and setting permissions."
-                  sudo chown runner:runner /run/nordlayer/nordlayer.sock
-                  sudo chmod 660 /run/nordlayer/nordlayer.sock
+              if [ -S "$SOCKET_PATH" ]; then
+                  echo "Found socket $SOCKET_PATH."
+                  echo "Current permissions for $SOCKET_PATH (before changes):"
+                  sudo ls -l "$SOCKET_PATH"
+
+                  # Primarily try chown, as group membership might not take effect immediately for CLI
+                  echo "Attempting to change ownership of $SOCKET_PATH to $(whoami):$(whoami)"
+                  sudo chown $(whoami):$(whoami) "$SOCKET_PATH"
+                  sudo chmod 660 "$SOCKET_PATH"
+                  
+                  echo "Permissions for $SOCKET_PATH after chown/chmod:"
+                  sudo ls -l "$SOCKET_PATH"
               else
-                  echo "WARNING: /run/nordlayer/nordlayer.sock not found or not a socket. Checking directory contents..."
-                  sudo ls -la /run/nordlayer/
+                  echo "CRITICAL WARNING: $SOCKET_PATH not found or not a socket *after* service start. Checking directory contents again:"
+                  sudo ls -la "$SOCKET_DIR"
+                  # It's very unlikely the socket wouldn't exist if the service is active, but good to log.
+                  # Consider exiting if it's truly missing:
+                  # exit 1 
               fi
 
-              echo "Final permissions in /run/nordlayer/:"
-              sudo ls -la /run/nordlayer/
+              echo "Final permissions in $SOCKET_DIR (after all attempts):"
+              sudo ls -la "$SOCKET_DIR"
               
-              echo "Attempting to list /run/nordlayer/ as runner..."
-              ls -la /run/nordlayer/
+              echo "Attempting to list $SOCKET_DIR as runner (current user)..."
+              ls -la "$SOCKET_DIR" || echo "Listing directory as runner failed (may be ok if socket is accessible)."
               
-              if [ -S "/run/nordlayer/nordlayer.sock" ]; then
-                  if [ -r "/run/nordlayer/nordlayer.sock" ] && [ -w "/run/nordlayer/nordlayer.sock" ]; then
-                      echo "Socket /run/nordlayer/nordlayer.sock exists and is R/W accessible by the runner."
-                  else
-                      echo "ERROR: Socket /run/nordlayer/nordlayer.sock exists but is NOT R/W accessible by the runner."
-                      exit 1
-                  fi
+              # This is the most important check - can the runner user access the socket?
+              # Using 'sudo -u $(whoami)' is a robust way to test as the current user.
+              if sudo -u $(whoami) test -r "$SOCKET_PATH" && sudo -u $(whoami) test -w "$SOCKET_PATH"; then
+                  echo "SUCCESS: Socket $SOCKET_PATH is R/W accessible by the $(whoami) user."
               else
-                  echo "ERROR: Socket /run/nordlayer/nordlayer.sock still not found after permission attempts."
-                  exit 1 
+                  echo "ERROR: Socket $SOCKET_PATH is NOT R/W accessible by the $(whoami) user."
+                  echo "$(whoami) user groups: $(groups)"
+                  echo "Socket current permissions: $(sudo ls -l $SOCKET_PATH || echo 'Socket not found or inaccessible for ls')"
+                  exit 1
               fi
           else
-              echo "ERROR: /run/nordlayer/ directory not found after service start."
+              echo "ERROR: $SOCKET_DIR directory not found after service start."
               exit 1
           fi
           sleep 2
 
       - name: Login to NordLayer VPN
         run: |
+          echo "Current user for NordLayer CLI: $(whoami)"
+          echo "Groups for current user: $(groups)"
           nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"
 
       - name: Connect to NordLayer VPN
@@ -181,7 +211,7 @@ jobs:
             --arg username "GitHub Actions" \
             --arg icon_emoji ":white_check_mark:" \
             --arg color "good" \
-            --arg title "Newman Test Run Succeeded (Testnet)" \
+            --arg title "Newman Test Run Succeeded (Testnet on ubuntu-22.04)" \
             --arg text "All tests passed successfully! Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
@@ -194,7 +224,7 @@ jobs:
             --arg username "GitHub Actions" \
             --arg icon_emoji ":warning:" \
             --arg color "warning" \
-            --arg title "Newman Test Run Has Failures (Testnet)" \
+            --arg title "Newman Test Run Has Failures (Testnet on ubuntu-22.04)" \
             --arg text "Newman tests completed but encountered failures. Check reports. Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
@@ -204,7 +234,7 @@ jobs:
         if: failure()
         run: |
           COLOR="danger"
-          TITLE="GitHub Actions Workflow Failed (Testnet Newman Tests)"
+          TITLE="GitHub Actions Workflow Failed (Testnet on ubuntu-22.04)"
           TEXT="One or more critical steps in the workflow failed. Check Actions run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
