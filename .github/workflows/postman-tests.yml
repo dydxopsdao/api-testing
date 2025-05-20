@@ -26,13 +26,13 @@ jobs:
           git push
 
       - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
+        id: install_deps # Give this step an ID for outputs
         run: |
+          # Assume npm install, repo setup, apt install nordlayer are fine from previous logs
           npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
-
           echo "System Info:"
           lsb_release -a
           uname -m
-
           echo "Setting up NordLayer repository using local ./nordlayer/nordlayer-latest_1.0.0_all.deb..."
           if [ -f "./nordlayer/nordlayer-latest_1.0.0_all.deb" ]; then
             sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
@@ -40,99 +40,127 @@ jobs:
             echo "ERROR: Local repository setup file ./nordlayer/nordlayer-latest_1.0.0_all.deb not found!"
             exit 1
           fi
-          
           sudo apt-get update -y
           sudo apt-get install -f -y
-          
           echo "Installing NordLayer package..."
           sudo apt-get install -y nordlayer 
 
           echo "Reloading systemd daemon..."
           sudo systemctl daemon-reload
-          
           echo "Attempting to stop NordLayer service (if running)..."
           sudo systemctl stop nordlayer.service || true
 
           echo "Attempting to enable and start NordLayer service..."
-          if ! sudo systemctl enable --now nordlayer.service; then
-            echo "ERROR: 'systemctl enable --now nordlayer.service' command failed."
+          # Try 'restart' as per your original working code, it might behave differently than 'enable --now' if service is flaky
+          if ! sudo systemctl restart nordlayer.service; then
+            echo "ERROR: 'systemctl restart nordlayer.service' command failed."
             sudo systemctl status nordlayer.service --no-pager
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            # Try to find more specific NordLayer daemon logs
+            echo "--- Checking for /var/log/nordlayer/ ---"
+            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
+            sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
             exit 1
           fi
-          echo "Command 'systemctl enable --now nordlayer.service' completed."
+          echo "Command 'systemctl restart nordlayer.service' completed."
 
-          echo "Waiting for NordLayer service to become fully active (max 60s)..."
-          timeout 60s bash -c 'until systemctl is-active --quiet nordlayer.service; do echo "Waiting for nordlayer.service..."; sleep 3; done'
-          
-          if ! systemctl is-active --quiet nordlayer.service; then
-            echo "ERROR: NordLayer service did not become active."
+          # More robust check for service stability
+          echo "Checking NordLayer service stability (max 60s)..."
+          STABLE_THRESHOLD=15 # Require service to be active for at least 15 seconds
+          END_TIME=$((SECONDS + 60))
+          SERVICE_STABLE=false
+          while [ $SECONDS -lt $END_TIME ]; do
+            if systemctl is-active --quiet nordlayer.service; then
+              echo "NordLayer service active, checking uptime..."
+              # Get service active state enter timestamp
+              ACTIVE_ENTER_TIMESTAMP_USEC=$(systemctl show nordlayer.service --property=ActiveEnterTimestampMonotonic --value)
+              if [ -n "$ACTIVE_ENTER_TIMESTAMP_USEC" ] && [ "$ACTIVE_ENTER_TIMESTAMP_USEC" -ne 0 ]; then
+                CURRENT_TIME_USEC=$(systemd-clock) # systemd-clock gives monotonic time in usec
+                SERVICE_UPTIME_SEC=$(((CURRENT_TIME_USEC - ACTIVE_ENTER_TIMESTAMP_USEC) / 1000000))
+                echo "Service current uptime: $SERVICE_UPTIME_SEC seconds."
+                if [ "$SERVICE_UPTIME_SEC" -ge "$STABLE_THRESHOLD" ]; then
+                  echo "NordLayer service has been stable for $SERVICE_UPTIME_SEC seconds."
+                  SERVICE_STABLE=true
+                  break
+                fi
+              else 
+                echo "Could not get ActiveEnterTimestampMonotonic, or it's zero."
+              fi
+            else
+              echo "NordLayer service not active. Waiting..."
+            fi
+            sleep 5
+          done
+
+          if [ "$SERVICE_STABLE" = false ]; then
+            echo "ERROR: NordLayer service did not become stable."
             sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            sudo journalctl -xeu nordlayer.service --no-pager -n 200 # More lines for flapping
+            # Try to find more specific NordLayer daemon logs
+            echo "--- Checking for /var/log/nordlayer/ ---"
+            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
+            sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
             exit 1
           fi
-          echo "NordLayer service IS reported ACTIVE by systemctl."
+          echo "NordLayer service IS STABLE and ACTIVE."
           
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
-          echo "Checking for socket existence at $SOCKET_PATH immediately after service activation..."
-          sleep 3 
-          
-          if [ -S "$SOCKET_PATH" ]; then
-            echo "SUCCESS: Socket $SOCKET_PATH found."
+          echo "Checking for socket $SOCKET_PATH..."
+          sleep 1 # Brief moment after stability check
+
+          # Use sudo for the -S test as well for accuracy
+          if sudo test -S "$SOCKET_PATH"; then
+            echo "SUCCESS: Socket $SOCKET_PATH found and is a socket."
             echo "Setting permissions on existing socket $SOCKET_PATH to 666 (rw-rw-rw-)..."
             sudo chmod 666 "$SOCKET_PATH"
             echo "Permissions on socket after chmod 666:"
             sudo ls -l "$SOCKET_PATH"
-            # If needed, ensure parent directory is accessible enough for the 'runner' user to traverse.
-            # Usually, runner doesn't need to list /run/nordlayer, just access the socket by its full path.
-            # sudo chmod o+x /run/nordlayer # Example: allow others to execute (traverse) directory
+            echo "::set-output name=socket_ready::true" # For subsequent steps
           else
-            echo "CRITICAL ERROR: Socket $SOCKET_PATH does NOT exist or is not a socket, even though service is active."
-            echo "Listing /run/nordlayer/ directory contents:"
+            echo "CRITICAL ERROR: Socket $SOCKET_PATH does NOT exist or is not a socket, even though service is STABLE."
             sudo ls -la /run/nordlayer/ 
-            echo "--- Status of nordlayer.service (when socket missing) ---"
             sudo systemctl status nordlayer.service --no-pager
-            echo "--- Journal for nordlayer.service (last 100 lines, when socket missing) ---"
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            echo "::set-output name=socket_ready::false"
             exit 1
           fi
           
-          echo "End of Install Dependencies step. Pausing for 5s before login attempt..."
-          sleep 5
+          echo "End of Install Dependencies step. Pausing for 2s before login attempt..."
+          sleep 2
 
       - name: Login to NordLayer VPN
+        # Only run if socket was ready from previous step
+        # if: steps.install_deps.outputs.socket_ready == 'true' 
+        # The above 'if' is problematic because install_deps exits on failure.
+        # So if we reach here, socket should be ready.
         run: |
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
           echo "Login Step: Current user: $(whoami), Groups: $(groups)"
-          echo "Login Step: Checking for socket $SOCKET_PATH existence *again* right before login..."
+          echo "Login Step: Verifying socket $SOCKET_PATH existence..."
           
-          if [ ! -S "$SOCKET_PATH" ]; then
+          if ! sudo test -S "$SOCKET_PATH"; then
             echo "CRITICAL ERROR (Login Step): Socket $SOCKET_PATH is MISSING or not a socket!"
-            echo "Listing /run/nordlayer/ directory contents:"
             sudo ls -la /run/nordlayer/
-            echo "--- Status of nordlayer.service (when socket missing at login) ---"
             sudo systemctl status nordlayer.service --no-pager
-            echo "--- Journal for nordlayer.service (last 100 lines, when socket missing at login) ---"
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
             exit 1
           else
-            echo "Login Step: Socket $SOCKET_PATH FOUND. Proceeding with login."
-            echo "Permissions of socket at login time:"
+            echo "Login Step: Socket $SOCKET_PATH FOUND. Permissions:"
             sudo ls -l "$SOCKET_PATH"
           fi
 
-          # Attempt login
           if ! nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"; then
             echo "ERROR: nordlayer login command failed."
-            # This journal output is crucial if the error is 'connection reset' or similar,
-            # less so if it's 'no such file or directory' as we've already covered that.
-            echo "--- Journal for nordlayer.service (last 100 lines) AT TIME OF LOGIN FAILURE ---"
             sudo journalctl -xeu nordlayer.service --no-pager -n 100 
+            # Try to find more specific NordLayer daemon logs
+            echo "--- Checking for /var/log/nordlayer/ AT LOGIN FAILURE ---"
+            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
+            sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
             exit 1
           fi
           echo "NordLayer login successful."
 
-      # ... (Rest of the workflow: Connect, Newman, Disconnect, Uploads, Slack - remains the same) ...
+      # ... (Rest of the workflow) ...
       - name: Connect to NordLayer VPN
         run: |
           nordlayer gateways
