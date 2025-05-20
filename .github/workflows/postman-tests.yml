@@ -13,21 +13,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
         with:
-          persist-credentials: true
+          persist-credentials: true 
 
       - name: Update Last Processed Upstream Run ID
         run: |
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com" # Standard noreply email
+          git pull --rebase # Avoid push conflicts
           git add .last_upstream_run_id.txt
           git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
           git push
 
-      - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
+      - name: Install Dependencies (Newman, NordLayer)
         run: |
-          # Install Newman
           npm install -g newman newman-reporter-htmlextra
 
           # Install NordLayer
@@ -36,73 +35,87 @@ jobs:
           uname -m
 
           echo "Attempting to set up NordLayer repository..."
-          # Download NordLayer's repository setup package
           sudo wget -qO /tmp/nordlayer-repo-setup.deb "https://downloads.nordlayer.com/linux/latest/nordlayer-latest_1.0.0_all.deb"
-          
-          # Install the repository setup package
-          # This package configures /etc/apt/sources.list.d/nordlayer.list
           sudo dpkg -i /tmp/nordlayer-repo-setup.deb
           
           echo "Checking if NordLayer APT source list was created:"
-          ls -l /etc/apt/sources.list.d/
           if [ -f /etc/apt/sources.list.d/nordlayer.list ]; then
             echo "Contents of /etc/apt/sources.list.d/nordlayer.list:"
             cat /etc/apt/sources.list.d/nordlayer.list
           else
             echo "ERROR: /etc/apt/sources.list.d/nordlayer.list was NOT created by dpkg -i."
-            # This would explain 'Unable to locate package'
+            exit 1
           fi
-          sudo rm /tmp/nordlayer-repo-setup.deb # Clean up downloaded .deb
+          sudo rm /tmp/nordlayer-repo-setup.deb # Clean up
 
           echo "Updating package lists after adding NordLayer repository..."
           sudo apt-get update
           
           echo "Checking APT cache for nordlayer package availability:"
           apt-cache policy nordlayer
-          # This will show if 'nordlayer' is found and from which repo.
 
           echo "Installing NordLayer package..."
-          # Use apt-get install -f -y first to resolve any dependencies from the dpkg step, though nordlayer-repo-setup.deb usually has none.
-          sudo apt-get install -f -y
-          sudo apt-get install -y nordlayer # This should now find the package
-
-          echo "NordLayer package installation command finished. Checking version..."
-          nordlayer --version || echo "Failed to get NordLayer version, package might not have installed correctly."
+          sudo apt-get install -f -y # Fix potential broken dependencies from dpkg
+          sudo apt-get install -y nordlayer # Install the actual nordlayer package
 
           echo "Reloading systemd daemon and attempting to start NordLayer service..."
           sudo systemctl daemon-reload
-          sudo systemctl stop nordlayer.service || true # Ensure it's stopped if it was somehow running
+          sudo systemctl stop nordlayer.service || true # Ensure it's stopped if somehow running
           sudo systemctl enable --now nordlayer.service # Enable and start
 
           echo "Waiting for NordLayer service to become active..."
+          # Wait up to 60 seconds for the service to be active
           timeout 60s bash -c 'until systemctl is-active --quiet nordlayer.service; do echo "Waiting for nordlayer.service (PID: $(systemctl show -p MainPID nordlayer.service | cut -d= -f2))..."; sleep 3; done'
           
           if ! systemctl is-active --quiet nordlayer.service; then
             echo "ERROR: NordLayer service failed to start."
             sudo systemctl status nordlayer.service --no-pager
-            echo "--- Journal for nordlayer.service ---"
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100 # Last 100 lines
+            echo "--- Journal for nordlayer.service (last 100 lines) ---"
+            sudo journalctl -xeu nordlayer.service --no-pager -n 100
             exit 1
           fi
           echo "NordLayer service is active."
           
           echo "Setting permissions for NordLayer socket..."
           if [ -d "/run/nordlayer/" ]; then
-              # Ensure the runner user can access the socket.
-              # The exact ownership/group might vary, but giving runner access is key.
-              # sudo chown runner:runner /run/nordlayer/nordlayer.sock
-              sudo chmod 666 /run/nordlayer/nordlayer.sock
-              ls -la /run/nordlayer/ # Verify permissions
-              echo "Permissions set for /run/nordlayer/nordlayer.sock"
-          else
-              echo "WARNING: /run/nordlayer/ directory not found after service start."
-              echo "This means the NordLayer client cannot be controlled."
-              if systemctl is-active --quiet nordlayer.service; then
-                 echo "ERROR: Nordlayer service is active, but /run/nordlayer/ or its socket is missing."
-                 exit 1
+              echo "Current permissions for /run/nordlayer/ directory:"
+              sudo ls -ld /run/nordlayer/
+              
+              if [ -S "/run/nordlayer/nordlayer.sock" ]; then # -S checks if it's a socket
+                  echo "Found socket /run/nordlayer/nordlayer.sock. Changing ownership to runner and setting permissions."
+                  sudo chown runner:runner /run/nordlayer/nordlayer.sock
+                  sudo chmod 660 /run/nordlayer/nordlayer.sock # rw- for owner (runner), rw- for group (runner)
+              else
+                  echo "WARNING: /run/nordlayer/nordlayer.sock not found or not a socket before permission change. Checking directory contents..."
+                  sudo ls -la /run/nordlayer/ # List contents for debugging
+                  # If socket is critical and not found, you might want to exit:
+                  # echo "ERROR: Socket not found, cannot proceed."
+                  # exit 1
               fi
+
+              echo "Final permissions in /run/nordlayer/:"
+              sudo ls -la /run/nordlayer/
+              
+              echo "Attempting to list /run/nordlayer/ as runner (current user)..."
+              ls -la /run/nordlayer/ # This tests if the runner can list the dir
+              
+              # Final check for socket existence and accessibility
+              if [ -S "/run/nordlayer/nordlayer.sock" ]; then
+                  if [ -r "/run/nordlayer/nordlayer.sock" ] && [ -w "/run/nordlayer/nordlayer.sock" ]; then
+                      echo "Socket /run/nordlayer/nordlayer.sock exists and is R/W accessible by the runner."
+                  else
+                      echo "ERROR: Socket /run/nordlayer/nordlayer.sock exists but is NOT R/W accessible by the runner."
+                      exit 1
+                  fi
+              else
+                  echo "ERROR: Socket /run/nordlayer/nordlayer.sock still not found or not a socket after permission attempts."
+                  exit 1 
+              fi
+          else
+              echo "ERROR: /run/nordlayer/ directory not found after service start."
+              exit 1
           fi
-          sleep 5 # Short pause for socket to be fully ready / permissions to apply
+          sleep 2 # Short pause for system to settle
 
       - name: Login to NordLayer VPN
         run: |
@@ -112,10 +125,10 @@ jobs:
         run: |
           nordlayer gateways
           nordlayer connect "dos-server-BQG2cKQV"
-          echo "Waiting for VPN connection to establish..."
+          echo "Waiting for VPN connection to establish (20s)..."
           sleep 20
           echo "Verifying VPN IP..."
-          curl --max-time 10 ifconfig.me || echo "Failed to get external IP via ifconfig.me"
+          curl --max-time 10 ifconfig.me || echo "Warning: Failed to get external IP via ifconfig.me"
           nordlayer status
 
       - name: Run Newman Tests for Testnet
@@ -127,14 +140,16 @@ jobs:
             --reporter-htmlextra-export newman-report.html \
             --reporter-junit-export results.xml
           NEWMAN_EXIT_CODE=$?
+          echo "Newman exit code: ${NEWMAN_EXIT_CODE}"
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
         continue-on-error: true
-
+        
       - name: Disconnect from NordLayer VPN
         if: always()
         run: |
+          echo "Attempting to disconnect from NordLayer VPN..."
           nordlayer status || true
-          nordlayer disconnect || echo "Already disconnected or failed to disconnect."
+          nordlayer disconnect || echo "NordLayer already disconnected or failed to disconnect."
 
       - name: Upload Test Results (JUnit XML)
         if: always()
@@ -142,50 +157,56 @@ jobs:
         with:
           name: postman-test-results
           path: results.xml
+          if-no-files-found: warn
 
       - name: Upload HTML Report (Nice UI)
-        if: always()
+        if: always() # Upload artifacts even on failure
         uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-html-report
           path: newman-report.html
-
+          if-no-files-found: warn
+          
       - name: Notify Slack on Success
         if: success() && steps.newman.outputs.exit_code == 0
         run: |
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
-            --arg username "github-actions" \
+            --arg username "GitHub Actions" \
             --arg icon_emoji ":white_check_mark:" \
             --arg color "good" \
             --arg title "Newman Test Run Succeeded (Testnet)" \
-            --arg text "All tests passed successfully after NordLayer VPN connection! Workflow: ${{ github.workflow }}, Run: ${{ github.run_id }}" \
+            --arg text "All tests passed successfully! Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
       - name: Notify Slack on Test Failure
+        # This condition means the job itself didn't fail (e.g., VPN setup was OK),
+        # but the Newman tests (steps.newman.outputs.exit_code) reported errors.
         if: success() && steps.newman.outputs.exit_code != 0
         run: |
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
-            --arg username "github-actions" \
+            --arg username "GitHub Actions" \
             --arg icon_emoji ":warning:" \
             --arg color "warning" \
             --arg title "Newman Test Run Has Failures (Testnet)" \
-            --arg text "Newman tests completed but encountered failures. Check reports. Workflow: ${{ github.workflow }}, Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --arg text "Newman tests completed but encountered failures. Check reports. Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
-          exit 1
+          exit 1 # Mark the overall job as failed due to test failures
 
       - name: Notify Slack on Workflow Step Failure
+        # This condition means a step *before* or *during* Newman execution failed,
+        # not just that Newman tests had errors (that's handled above).
         if: failure()
         run: |
           COLOR="danger"
           TITLE="GitHub Actions Workflow Failed (Testnet Newman Tests)"
-          TEXT="One or more critical steps failed. Check Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TEXT="One or more critical steps in the workflow failed (e.g., VPN setup, Newman execution). Check Actions run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
-            --arg username "github-actions" \
+            --arg username "GitHub Actions" \
             --arg icon_emoji ":x:" \
             --arg color "$COLOR" \
             --arg title "$TITLE" \
