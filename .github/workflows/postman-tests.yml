@@ -6,7 +6,7 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-22.04 # Switched to 22.04 for service stability
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
@@ -18,7 +18,6 @@ jobs:
       - name: Update Last Processed Upstream Run ID
         run: |
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-          # rm -f last_run_id.txt # Uncomment if this file should be removed
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase
@@ -35,20 +34,17 @@ jobs:
           uname -m
 
           echo "Setting up NordLayer repository using local ./nordlayer/nordlayer-latest_1.0.0_all.deb..."
-          # This relies on the .deb file being present in your repository at the specified path.
           if [ -f "./nordlayer/nordlayer-latest_1.0.0_all.deb" ]; then
             sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
           else
             echo "ERROR: Local repository setup file ./nordlayer/nordlayer-latest_1.0.0_all.deb not found!"
-            echo "Please ensure this file is present in the 'nordlayer' directory of your repository."
             exit 1
           fi
           
-          sudo apt-get update -y # Update after repo setup
-          sudo apt-get install -f -y # Fix dependencies if any from dpkg
+          sudo apt-get update -y
+          sudo apt-get install -f -y
           
           echo "Installing NordLayer package..."
-          # This should now install nordlayer from the repository configured by the .deb
           sudo apt-get install -y nordlayer 
 
           echo "Reloading systemd daemon..."
@@ -60,59 +56,88 @@ jobs:
           echo "Attempting to enable and start NordLayer service..."
           if ! sudo systemctl enable --now nordlayer.service; then
             echo "ERROR: 'systemctl enable --now nordlayer.service' command failed."
-            echo "--- Status of nordlayer.service ---"
             sudo systemctl status nordlayer.service --no-pager
-            echo "--- Journal for nordlayer.service (last 100 lines) ---"
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
             exit 1
           fi
           echo "Command 'systemctl enable --now nordlayer.service' completed."
 
-          echo "Waiting for NordLayer service to become fully active..."
-          # Wait up to 60 seconds for the service to be active
+          echo "Waiting for NordLayer service to become fully active (max 60s)..."
           timeout 60s bash -c 'until systemctl is-active --quiet nordlayer.service; do echo "Waiting for nordlayer.service..."; sleep 3; done'
           
           if ! systemctl is-active --quiet nordlayer.service; then
             echo "ERROR: NordLayer service did not become active."
             sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100 # Logs if timeout
+            sudo journalctl -xeu nordlayer.service --no-pager -n 100
             exit 1
           fi
-          echo "NordLayer service is active."
+          echo "NordLayer service IS reported ACTIVE by systemctl."
           
-          echo "Setting permissions for /run/nordlayer/ (Your Original Method)..."
-          sleep 3 # Give service a moment to create socket/directory fully
-          if [ -d "/run/nordlayer" ]; then
-            sudo chown -R $(whoami):$(whoami) /run/nordlayer/
-            sudo chmod 755 /run/nordlayer
-            if [ -S "/run/nordlayer/nordlayer.sock" ]; then
-              sudo chmod 666 /run/nordlayer/nordlayer.sock
-              echo "Permissions set on /run/nordlayer/ and nordlayer.sock."
-              echo "Verifying socket permissions:"
-              ls -la /run/nordlayer/
-            else
-              echo "ERROR: /run/nordlayer/nordlayer.sock not found after service start and sleep!"
-              ls -la /run/nordlayer/
-              exit 1
-            fi
+          SOCKET_PATH="/run/nordlayer/nordlayer.sock"
+          echo "Checking for socket existence at $SOCKET_PATH immediately after service activation..."
+          sleep 3 
+          
+          if [ -S "$SOCKET_PATH" ]; then
+            echo "SUCCESS: Socket $SOCKET_PATH found."
+            echo "Setting permissions on existing socket $SOCKET_PATH to 666 (rw-rw-rw-)..."
+            sudo chmod 666 "$SOCKET_PATH"
+            echo "Permissions on socket after chmod 666:"
+            sudo ls -l "$SOCKET_PATH"
+            # If needed, ensure parent directory is accessible enough for the 'runner' user to traverse.
+            # Usually, runner doesn't need to list /run/nordlayer, just access the socket by its full path.
+            # sudo chmod o+x /run/nordlayer # Example: allow others to execute (traverse) directory
           else
-            echo "ERROR: /run/nordlayer directory not found after service start and sleep!"
+            echo "CRITICAL ERROR: Socket $SOCKET_PATH does NOT exist or is not a socket, even though service is active."
+            echo "Listing /run/nordlayer/ directory contents:"
+            sudo ls -la /run/nordlayer/ 
+            echo "--- Status of nordlayer.service (when socket missing) ---"
+            sudo systemctl status nordlayer.service --no-pager
+            echo "--- Journal for nordlayer.service (last 100 lines, when socket missing) ---"
+            sudo journalctl -xeu nordlayer.service --no-pager -n 100
             exit 1
           fi
-          echo "Giving NordLayer service extra time to settle (10s)..." # <<< INCREASED SLEEP
-          sleep 10
+          
+          echo "End of Install Dependencies step. Pausing for 5s before login attempt..."
+          sleep 5
 
       - name: Login to NordLayer VPN
         run: |
-          echo "Current user for NordLayer CLI: $(whoami)"
-          echo "Groups for current user: $(groups)"
-          nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"
+          SOCKET_PATH="/run/nordlayer/nordlayer.sock"
+          echo "Login Step: Current user: $(whoami), Groups: $(groups)"
+          echo "Login Step: Checking for socket $SOCKET_PATH existence *again* right before login..."
+          
+          if [ ! -S "$SOCKET_PATH" ]; then
+            echo "CRITICAL ERROR (Login Step): Socket $SOCKET_PATH is MISSING or not a socket!"
+            echo "Listing /run/nordlayer/ directory contents:"
+            sudo ls -la /run/nordlayer/
+            echo "--- Status of nordlayer.service (when socket missing at login) ---"
+            sudo systemctl status nordlayer.service --no-pager
+            echo "--- Journal for nordlayer.service (last 100 lines, when socket missing at login) ---"
+            sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            exit 1
+          else
+            echo "Login Step: Socket $SOCKET_PATH FOUND. Proceeding with login."
+            echo "Permissions of socket at login time:"
+            sudo ls -l "$SOCKET_PATH"
+          fi
 
+          # Attempt login
+          if ! nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"; then
+            echo "ERROR: nordlayer login command failed."
+            # This journal output is crucial if the error is 'connection reset' or similar,
+            # less so if it's 'no such file or directory' as we've already covered that.
+            echo "--- Journal for nordlayer.service (last 100 lines) AT TIME OF LOGIN FAILURE ---"
+            sudo journalctl -xeu nordlayer.service --no-pager -n 100 
+            exit 1
+          fi
+          echo "NordLayer login successful."
+
+      # ... (Rest of the workflow: Connect, Newman, Disconnect, Uploads, Slack - remains the same) ...
       - name: Connect to NordLayer VPN
         run: |
           nordlayer gateways
           nordlayer connect "dos-server-BQG2cKQV"
-          sleep 20 # Allow time for connection
+          sleep 20 
           echo "Verifying VPN IP..."
           curl --max-time 10 ifconfig.me || echo "Warning: Could not verify external IP."
 
@@ -126,10 +151,10 @@ jobs:
             --reporter-junit-export results.xml
           NEWMAN_EXIT_CODE=$?
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
-        continue-on-error: true # Allow subsequent steps to run for reporting
+        continue-on-error: true
 
       - name: Disconnect from NordLayer VPN
-        if: always() # Ensure disconnect happens
+        if: always()
         run: |
           nordlayer status || true
           nordlayer disconnect || echo "Already disconnected or failed to disconnect."
@@ -140,7 +165,7 @@ jobs:
         with:
           name: postman-test-results
           path: results.xml
-          if-no-files-found: warn # Don't fail if file is missing
+          if-no-files-found: warn
 
       - name: Upload HTML Report (Nice UI)
         if: always()
@@ -155,10 +180,9 @@ jobs:
         run: |
           NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code }}" 
           JOB_STATUS="${{ job.status }}"
-
           FINAL_MESSAGE=""
-          ICON=":test_tube:" # Default icon
-          COLOR="warning" # Default color
+          ICON=":test_tube:" 
+          COLOR="warning" 
           TITLE_TEXT="NordLayer & Newman Test Run (Testnet on ubuntu-22.04)"
 
           if [ "$JOB_STATUS" == "success" ]; then
@@ -178,7 +202,6 @@ jobs:
           fi
           
           TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
-
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
             --arg username "GitHub Actions" \
@@ -188,17 +211,11 @@ jobs:
             --arg text "$TEXT_MESSAGE" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           
-          echo "Sending payload to Slack:"
           echo "$PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-          # Determine overall workflow success/failure for GitHub Actions UI
           if [ "$JOB_STATUS" == "failure" ]; then
-            echo "Workflow job failed."
             exit 1
           elif [ -n "$NEWMAN_EXIT_CODE" ] && [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
-            echo "Newman tests failed with exit code $NEWMAN_EXIT_CODE. Marking job as failed."
             exit 1
-          else
-            echo "Workflow and tests (if run) were successful."
           fi
