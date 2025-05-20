@@ -6,7 +6,7 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest 
     permissions:
       contents: write
     steps:
@@ -14,32 +14,68 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           persist-credentials: true
-
+          
       - name: Update Last Processed Upstream Run ID
         run: |
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-          rm -f last_run_id.txt
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
+          # rm -f last_run_id.txt # Remove if this file is truly obsolete
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase # Avoid race conditions
           git add .last_upstream_run_id.txt
           git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
           git push
 
       - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
         run: |
-          npm install -g newman newman-reporter-htmlextra
+          # Install Newman & Datadog CLI
+          npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
+
+          # Install NordLayer
           sudo apt-get update
-          sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
-          sudo apt-get install -f -y
-          sudo apt-get update
+          # The dpkg -i step was redundant as apt-get install nordlayer fetches the proper package
+          # sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
+          # sudo apt-get install -f -y # Might still be needed if nordlayer has complex deps not auto-resolved
+          
+          echo "Installing NordLayer..."
           sudo apt-get install -y nordlayer
+          
+          echo "Reloading systemd daemon and starting NordLayer service..."
           sudo systemctl daemon-reload
-          sudo systemctl restart nordlayer.service
-          sleep 2
-          sudo chown -R runner:runner /run/nordlayer/
-          sudo chmod 755 /run/nordlayer
-          sudo chmod 666 /run/nordlayer/nordlayer.sock
-          npm install -g @datadog/datadog-ci
+          sudo systemctl stop nordlayer.service || true # Ensure it's stopped if it was somehow running
+          sudo systemctl enable --now nordlayer.service # Enable and start
+
+          echo "Waiting for NordLayer service to become active..."
+          # Wait up to 60 seconds for the service to be active
+          timeout 60s bash -c 'until systemctl is-active --quiet nordlayer.service; do echo "Waiting for nordlayer.service..."; sleep 3; done'
+          
+          if ! systemctl is-active --quiet nordlayer.service; then
+            echo "NordLayer service failed to start."
+            sudo systemctl status nordlayer.service --no-pager
+            sudo journalctl -xeu nordlayer.service --no-pager
+            exit 1
+          fi
+          echo "NordLayer service is active."
+          
+          # Permissions for the runner user to interact with the NordLayer socket
+          # These need to be set after the service has started and created the socket.
+          # The socket is typically owned by root or a nordlayer group.
+          # Giving 666 is broad but often necessary in CI for the runner user.
+          echo "Setting permissions for NordLayer socket..."
+          if [ -d "/run/nordlayer/" ]; then
+              sudo chown -R runner:runner /run/nordlayer/
+              sudo chmod 755 /run/nordlayer
+              if [ -S "/run/nordlayer/nordlayer.sock" ]; then # Check if it's a socket
+                  sudo chmod 666 /run/nordlayer/nordlayer.sock
+                  echo "Permissions set for /run/nordlayer/nordlayer.sock"
+              else
+                  echo "Warning: /run/nordlayer/nordlayer.sock not found or not a socket after service start."
+                  ls -la /run/nordlayer/ # For debugging
+              fi
+          else
+              echo "Warning: /run/nordlayer/ directory not found after service start."
+          fi
+          sleep 5 # Short pause for permissions to apply / socket to be fully ready
 
       - name: Login to NordLayer VPN
         run: |
@@ -49,9 +85,11 @@ jobs:
         run: |
           nordlayer gateways
           nordlayer connect "dos-server-BQG2cKQV"
-          sleep 20
+          echo "Waiting for VPN connection to establish..."
+          sleep 20 # Give ample time for connection
           echo "Verifying VPN IP..."
-          curl ifconfig.me
+          curl --max-time 10 ifconfig.me || echo "Failed to get external IP via ifconfig.me"
+          nordlayer status
 
       - name: Run Newman Tests for Testnet
         id: newman
@@ -66,59 +104,64 @@ jobs:
         continue-on-error: true
 
       - name: Disconnect from NordLayer VPN
+        if: always() 
         run: |
           nordlayer status || true
-          nordlayer disconnect || echo "Already disconnected"
-
-      # - name: Upload Test Results to Datadog
-      #   run: datadog-ci junit upload results.xml --service "indexer-api-testing"
-      #   env:
-      #     DD_API_KEY: ${{ secrets.DD_API_KEY }}
-      #     DD_SITE: ap1.datadoghq.com
+          nordlayer disconnect || echo "Already disconnected or failed to disconnect."\
 
       - name: Upload Test Results (JUnit XML)
+        if: always() # Upload artifacts even on failure
         uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-test-results
           path: results.xml
 
       - name: Upload HTML Report (Nice UI)
+        if: always() # Upload artifacts even on failure
         uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-html-report
           path: newman-report.html
 
-      - name: Notify Slack Channel
-        if: always()
+      - name: Notify Slack on Success
+        if: success() && steps.newman.outputs.exit_code == 0
         run: |
-          NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code || 0 }}"
-          if [ "$NEWMAN_EXIT_CODE" -eq 0 ]; then
-            COLOR="good"
-            STATUS="success"
-          else
-            COLOR="danger"
-            STATUS="failure"
-          fi
-          TEXT="Newman tests on testnet have completed with status: $STATUS (exit code: $NEWMAN_EXIT_CODE)."
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
             --arg username "github-actions" \
-            --arg icon_emoji ":rocket:" \
+            --arg icon_emoji ":white_check_mark:" \
+            --arg color "good" \
+            --arg title "Newman Test Run Succeeded (Testnet)" \
+            --arg text "All tests passed successfully after NordLayer VPN connection!" \
+            '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
+          curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
+
+      - name: Notify Slack on Test Failure
+        if: success() && steps.newman.outputs.exit_code != 0 # Job succeeded, but tests failed
+        run: |
+          PAYLOAD=$(jq -n \
+            --arg channel "indexer-api-testing" \
+            --arg username "github-actions" \
+            --arg icon_emoji ":warning:" \
+            --arg color "warning" \
+            --arg title "Newman Test Run Has Failures (Testnet)" \
+            --arg text "Newman tests completed but encountered failures. Check the HTML report and JUnit results." \
+            '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
+          curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
+          exit 1 # Mark the job as failed due to test failures
+
+      - name: Notify Slack on Workflow Step Failure
+        if: failure() # A step before or including Newman (but not test failures handled above) failed
+        run: |
+          COLOR="danger"
+          TITLE="GitHub Actions Workflow Failed (Testnet Newman Tests)"
+          TEXT="One or more critical steps in the workflow failed (e.g., VPN setup, Newman execution itself). Check the Actions run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -n \
+            --arg channel "indexer-api-testing" \
+            --arg username "github-actions" \
+            --arg icon_emoji ":x:" \
             --arg color "$COLOR" \
-            --arg title "Newman Test Run Result" \
+            --arg title "$TITLE" \
             --arg text "$TEXT" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
-          echo "Sending payload to Slack:"
-          echo "$PAYLOAD"
-          curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
-
-      - name: Fail workflow if Newman tests failed
-        if: always()
-        run: |
-          NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code || 0 }}"
-          if [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
-            echo "Newman tests failed with exit code $NEWMAN_EXIT_CODE."
-            exit 1
-          else
-            echo "Newman tests passed."
-          fi
+          curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
