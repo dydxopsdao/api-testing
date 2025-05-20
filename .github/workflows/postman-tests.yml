@@ -6,21 +6,21 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 
     permissions:
       contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
         with:
-          persist-credentials: true 
+          persist-credentials: true
 
       - name: Update Last Processed Upstream Run ID
         run: |
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com" # Standard noreply email
-          git pull --rebase # Avoid push conflicts
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase
           git add .last_upstream_run_id.txt
           git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
           git push
@@ -29,7 +29,6 @@ jobs:
         run: |
           npm install -g newman newman-reporter-htmlextra
 
-          # Install NordLayer
           echo "System Info:"
           lsb_release -a
           uname -m
@@ -38,7 +37,6 @@ jobs:
           sudo wget -qO /tmp/nordlayer-repo-setup.deb "https://downloads.nordlayer.com/linux/latest/nordlayer-latest_1.0.0_all.deb"
           sudo dpkg -i /tmp/nordlayer-repo-setup.deb
           
-          echo "Checking if NordLayer APT source list was created:"
           if [ -f /etc/apt/sources.list.d/nordlayer.list ]; then
             echo "Contents of /etc/apt/sources.list.d/nordlayer.list:"
             cat /etc/apt/sources.list.d/nordlayer.list
@@ -46,31 +44,43 @@ jobs:
             echo "ERROR: /etc/apt/sources.list.d/nordlayer.list was NOT created by dpkg -i."
             exit 1
           fi
-          sudo rm /tmp/nordlayer-repo-setup.deb # Clean up
+          sudo rm /tmp/nordlayer-repo-setup.deb
 
-          echo "Updating package lists after adding NordLayer repository..."
+          echo "Updating package lists..."
           sudo apt-get update
           
-          echo "Checking APT cache for nordlayer package availability:"
+          echo "Checking APT cache for nordlayer..."
           apt-cache policy nordlayer
 
           echo "Installing NordLayer package..."
-          sudo apt-get install -f -y # Fix potential broken dependencies from dpkg
-          sudo apt-get install -y nordlayer # Install the actual nordlayer package
+          sudo apt-get install -f -y
+          sudo apt-get install -y nordlayer
 
-          echo "Reloading systemd daemon and attempting to start NordLayer service..."
+          echo "Reloading systemd daemon..."
           sudo systemctl daemon-reload
-          sudo systemctl stop nordlayer.service || true # Ensure it's stopped if somehow running
-          sudo systemctl enable --now nordlayer.service # Enable and start
+          
+          echo "Attempting to stop NordLayer service (if running)..."
+          sudo systemctl stop nordlayer.service || true
 
-          echo "Waiting for NordLayer service to become active..."
-          # Wait up to 60 seconds for the service to be active
+          echo "Attempting to enable and start NordLayer service..."
+          if ! sudo systemctl enable --now nordlayer.service; then
+            echo "ERROR: 'systemctl enable --now nordlayer.service' command failed."
+            echo "--- Status of nordlayer.service ---"
+            sudo systemctl status nordlayer.service --no-pager
+            echo "--- Journal for nordlayer.service (last 100 lines) ---"
+            sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            exit 1
+          fi
+          echo "Command 'systemctl enable --now nordlayer.service' completed."
+
+          echo "Waiting for NordLayer service to become fully active..."
           timeout 60s bash -c 'until systemctl is-active --quiet nordlayer.service; do echo "Waiting for nordlayer.service (PID: $(systemctl show -p MainPID nordlayer.service | cut -d= -f2))..."; sleep 3; done'
           
           if ! systemctl is-active --quiet nordlayer.service; then
-            echo "ERROR: NordLayer service failed to start."
+            echo "ERROR: NordLayer service did not become active after 'enable --now' and waiting."
+            echo "--- Status of nordlayer.service (after timeout) ---"
             sudo systemctl status nordlayer.service --no-pager
-            echo "--- Journal for nordlayer.service (last 100 lines) ---"
+            echo "--- Journal for nordlayer.service (last 100 lines, after timeout) ---"
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
             exit 1
           fi
@@ -81,25 +91,21 @@ jobs:
               echo "Current permissions for /run/nordlayer/ directory:"
               sudo ls -ld /run/nordlayer/
               
-              if [ -S "/run/nordlayer/nordlayer.sock" ]; then # -S checks if it's a socket
+              if [ -S "/run/nordlayer/nordlayer.sock" ]; then
                   echo "Found socket /run/nordlayer/nordlayer.sock. Changing ownership to runner and setting permissions."
                   sudo chown runner:runner /run/nordlayer/nordlayer.sock
-                  sudo chmod 660 /run/nordlayer/nordlayer.sock # rw- for owner (runner), rw- for group (runner)
+                  sudo chmod 660 /run/nordlayer/nordlayer.sock
               else
-                  echo "WARNING: /run/nordlayer/nordlayer.sock not found or not a socket before permission change. Checking directory contents..."
-                  sudo ls -la /run/nordlayer/ # List contents for debugging
-                  # If socket is critical and not found, you might want to exit:
-                  # echo "ERROR: Socket not found, cannot proceed."
-                  # exit 1
+                  echo "WARNING: /run/nordlayer/nordlayer.sock not found or not a socket. Checking directory contents..."
+                  sudo ls -la /run/nordlayer/
               fi
 
               echo "Final permissions in /run/nordlayer/:"
               sudo ls -la /run/nordlayer/
               
-              echo "Attempting to list /run/nordlayer/ as runner (current user)..."
-              ls -la /run/nordlayer/ # This tests if the runner can list the dir
+              echo "Attempting to list /run/nordlayer/ as runner..."
+              ls -la /run/nordlayer/
               
-              # Final check for socket existence and accessibility
               if [ -S "/run/nordlayer/nordlayer.sock" ]; then
                   if [ -r "/run/nordlayer/nordlayer.sock" ] && [ -w "/run/nordlayer/nordlayer.sock" ]; then
                       echo "Socket /run/nordlayer/nordlayer.sock exists and is R/W accessible by the runner."
@@ -108,14 +114,14 @@ jobs:
                       exit 1
                   fi
               else
-                  echo "ERROR: Socket /run/nordlayer/nordlayer.sock still not found or not a socket after permission attempts."
+                  echo "ERROR: Socket /run/nordlayer/nordlayer.sock still not found after permission attempts."
                   exit 1 
               fi
           else
               echo "ERROR: /run/nordlayer/ directory not found after service start."
               exit 1
           fi
-          sleep 2 # Short pause for system to settle
+          sleep 2
 
       - name: Login to NordLayer VPN
         run: |
@@ -143,7 +149,7 @@ jobs:
           echo "Newman exit code: ${NEWMAN_EXIT_CODE}"
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
         continue-on-error: true
-        
+
       - name: Disconnect from NordLayer VPN
         if: always()
         run: |
@@ -160,13 +166,13 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload HTML Report (Nice UI)
-        if: always() # Upload artifacts even on failure
+        if: always()
         uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-html-report
           path: newman-report.html
           if-no-files-found: warn
-          
+
       - name: Notify Slack on Success
         if: success() && steps.newman.outputs.exit_code == 0
         run: |
@@ -181,8 +187,6 @@ jobs:
           curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
       - name: Notify Slack on Test Failure
-        # This condition means the job itself didn't fail (e.g., VPN setup was OK),
-        # but the Newman tests (steps.newman.outputs.exit_code) reported errors.
         if: success() && steps.newman.outputs.exit_code != 0
         run: |
           PAYLOAD=$(jq -n \
@@ -194,16 +198,14 @@ jobs:
             --arg text "Newman tests completed but encountered failures. Check reports. Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           curl -X POST -H "Content-Type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
-          exit 1 # Mark the overall job as failed due to test failures
+          exit 1
 
       - name: Notify Slack on Workflow Step Failure
-        # This condition means a step *before* or *during* Newman execution failed,
-        # not just that Newman tests had errors (that's handled above).
         if: failure()
         run: |
           COLOR="danger"
           TITLE="GitHub Actions Workflow Failed (Testnet Newman Tests)"
-          TEXT="One or more critical steps in the workflow failed (e.g., VPN setup, Newman execution). Check Actions run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
+          TEXT="One or more critical steps in the workflow failed. Check Actions run: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
             --arg username "GitHub Actions" \
