@@ -83,22 +83,24 @@ jobs:
           echo "Setting permissions for /run/nordlayer/ (Your Original Method)..."
           sleep 3 # Give service a moment to create socket/directory fully
           if [ -d "/run/nordlayer" ]; then
-            sudo chown -R $(whoami):$(whoami) /run/nordlayer/ # $(whoami) resolves to 'runner'
+            sudo chown -R $(whoami):$(whoami) /run/nordlayer/
             sudo chmod 755 /run/nordlayer
-            if [ -S "/run/nordlayer/nordlayer.sock" ]; then # -S checks if it's a socket file
-              sudo chmod 666 /run/nordlayer/nordlayer.sock # rw-rw-rw- permissions
+            if [ -S "/run/nordlayer/nordlayer.sock" ]; then
+              sudo chmod 666 /run/nordlayer/nordlayer.sock
               echo "Permissions set on /run/nordlayer/ and nordlayer.sock."
               echo "Verifying socket permissions:"
               ls -la /run/nordlayer/
             else
               echo "ERROR: /run/nordlayer/nordlayer.sock not found after service start and sleep!"
-              ls -la /run/nordlayer/ # Show what is (or isn't) there
+              ls -la /run/nordlayer/
               exit 1
             fi
           else
             echo "ERROR: /run/nordlayer directory not found after service start and sleep!"
             exit 1
           fi
+          echo "Giving NordLayer service extra time to settle (10s)..." # <<< INCREASED SLEEP
+          sleep 10
 
       - name: Login to NordLayer VPN
         run: |
