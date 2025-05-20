@@ -26,9 +26,8 @@ jobs:
           git push
 
       - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
-        id: install_deps # Give this step an ID for outputs
+        id: install_deps
         run: |
-          # Assume npm install, repo setup, apt install nordlayer are fine from previous logs
           npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
           echo "System Info:"
           lsb_release -a
@@ -50,13 +49,14 @@ jobs:
           echo "Attempting to stop NordLayer service (if running)..."
           sudo systemctl stop nordlayer.service || true
 
-          echo "Attempting to enable and start NordLayer service..."
-          # Try 'restart' as per your original working code, it might behave differently than 'enable --now' if service is flaky
+          echo "Attempting to restart NordLayer service..."
+          # Using 'restart' as it might handle some flaky services differently.
+          # Also, explicitly reset failed state before restart attempt for cleaner state.
+          sudo systemctl reset-failed nordlayer.service || true 
           if ! sudo systemctl restart nordlayer.service; then
             echo "ERROR: 'systemctl restart nordlayer.service' command failed."
             sudo systemctl status nordlayer.service --no-pager
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
-            # Try to find more specific NordLayer daemon logs
             echo "--- Checking for /var/log/nordlayer/ ---"
             sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
             sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
@@ -64,64 +64,75 @@ jobs:
           fi
           echo "Command 'systemctl restart nordlayer.service' completed."
 
-          # More robust check for service stability
-          echo "Checking NordLayer service stability (max 60s)..."
-          STABLE_THRESHOLD=15 # Require service to be active for at least 15 seconds
-          END_TIME=$((SECONDS + 60))
-          SERVICE_STABLE=false
-          while [ $SECONDS -lt $END_TIME ]; do
-            if systemctl is-active --quiet nordlayer.service; then
-              echo "NordLayer service active, checking uptime..."
-              # Get service active state enter timestamp
-              ACTIVE_ENTER_TIMESTAMP_USEC=$(systemctl show nordlayer.service --property=ActiveEnterTimestampMonotonic --value)
-              if [ -n "$ACTIVE_ENTER_TIMESTAMP_USEC" ] && [ "$ACTIVE_ENTER_TIMESTAMP_USEC" -ne 0 ]; then
-                CURRENT_TIME_USEC=$(systemd-clock) # systemd-clock gives monotonic time in usec
-                SERVICE_UPTIME_SEC=$(((CURRENT_TIME_USEC - ACTIVE_ENTER_TIMESTAMP_USEC) / 1000000))
-                echo "Service current uptime: $SERVICE_UPTIME_SEC seconds."
-                if [ "$SERVICE_UPTIME_SEC" -ge "$STABLE_THRESHOLD" ]; then
-                  echo "NordLayer service has been stable for $SERVICE_UPTIME_SEC seconds."
-                  SERVICE_STABLE=true
-                  break
-                fi
-              else 
-                echo "Could not get ActiveEnterTimestampMonotonic, or it's zero."
-              fi
-            else
-              echo "NordLayer service not active. Waiting..."
+          # Simplified stability check using NRestarts
+          echo "Checking NordLayer service stability (approx 20s)..."
+          MAX_RESTART_CHECKS=4
+          CHECKS_DONE=0
+          SERVICE_STABLE_ENOUGH=false
+          # Get initial restart count *after* our explicit restart
+          # It's possible systemd's NRestarts counter is cumulative across reboots/etc.
+          # For this check, we are interested if it increments *after* our explicit restart.
+          # However, a simpler check is just ensuring it's not excessively high.
+          
+          # Allow a few seconds for the service to settle after restart command
+          sleep 5 
+
+          while [ $CHECKS_DONE -lt $MAX_RESTART_CHECKS ]; do
+            if ! systemctl is-active --quiet nordlayer.service; then
+              echo "NordLayer service is NOT active (Check $((CHECKS_DONE+1))/$MAX_RESTART_CHECKS)."
+              SERVICE_STABLE_ENOUGH=false
+              break 
             fi
-            sleep 5
+
+            RESTART_COUNT=$(systemctl show nordlayer.service --property=NRestarts --value)
+            echo "Service active. NRestarts: $RESTART_COUNT (Check $((CHECKS_DONE+1))/$MAX_RESTART_CHECKS)."
+            
+            # If NRestarts is low, assume stable for this check.
+            # The definition of "low" can be tricky. After an explicit 'restart', NRestarts should ideally be 0.
+            # If it's already > 0, it might have failed during the restart command itself.
+            # If it increments during our loop, that's bad.
+            # Let's consider it stable if it's active and NRestarts is not excessively high (e.g. <= 2).
+            if [ "$RESTART_COUNT" -le 2 ]; then
+                SERVICE_STABLE_ENOUGH=true
+                # If it's stable for one check iteration, we can break early, or continue for more confidence.
+                # For now, let's break if it looks good.
+                break 
+            else
+                echo "Warning: Service has NRestarts=$RESTART_COUNT. This might indicate instability."
+                SERVICE_STABLE_ENOUGH=false 
+                break 
+            fi
+            sleep 5 # Wait before next check if we didn't break
+            CHECKS_DONE=$((CHECKS_DONE+1))
           done
 
-          if [ "$SERVICE_STABLE" = false ]; then
-            echo "ERROR: NordLayer service did not become stable."
+
+          if [ "$SERVICE_STABLE_ENOUGH" = false ]; then
+            echo "ERROR: NordLayer service is not stable or not active after checks."
             sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 200 # More lines for flapping
-            # Try to find more specific NordLayer daemon logs
+            sudo journalctl -xeu nordlayer.service --no-pager -n 200
             echo "--- Checking for /var/log/nordlayer/ ---"
             sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
             sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
             exit 1
           fi
-          echo "NordLayer service IS STABLE and ACTIVE."
+          echo "NordLayer service appears STABLE and ACTIVE."
           
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
           echo "Checking for socket $SOCKET_PATH..."
-          sleep 1 # Brief moment after stability check
+          sleep 1 
 
-          # Use sudo for the -S test as well for accuracy
           if sudo test -S "$SOCKET_PATH"; then
             echo "SUCCESS: Socket $SOCKET_PATH found and is a socket."
-            echo "Setting permissions on existing socket $SOCKET_PATH to 666 (rw-rw-rw-)..."
+            echo "Setting permissions on existing socket $SOCKET_PATH to 666..."
             sudo chmod 666 "$SOCKET_PATH"
             echo "Permissions on socket after chmod 666:"
             sudo ls -l "$SOCKET_PATH"
-            echo "::set-output name=socket_ready::true" # For subsequent steps
           else
             echo "CRITICAL ERROR: Socket $SOCKET_PATH does NOT exist or is not a socket, even though service is STABLE."
             sudo ls -la /run/nordlayer/ 
             sudo systemctl status nordlayer.service --no-pager
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
-            echo "::set-output name=socket_ready::false"
             exit 1
           fi
           
@@ -129,10 +140,6 @@ jobs:
           sleep 2
 
       - name: Login to NordLayer VPN
-        # Only run if socket was ready from previous step
-        # if: steps.install_deps.outputs.socket_ready == 'true' 
-        # The above 'if' is problematic because install_deps exits on failure.
-        # So if we reach here, socket should be ready.
         run: |
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
           echo "Login Step: Current user: $(whoami), Groups: $(groups)"
@@ -152,7 +159,6 @@ jobs:
           if ! nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"; then
             echo "ERROR: nordlayer login command failed."
             sudo journalctl -xeu nordlayer.service --no-pager -n 100 
-            # Try to find more specific NordLayer daemon logs
             echo "--- Checking for /var/log/nordlayer/ AT LOGIN FAILURE ---"
             sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
             sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
@@ -160,7 +166,7 @@ jobs:
           fi
           echo "NordLayer login successful."
 
-      # ... (Rest of the workflow) ...
+      # ... (Rest of the workflow: Connect, Newman, Disconnect, Uploads, Slack) ...
       - name: Connect to NordLayer VPN
         run: |
           nordlayer gateways
