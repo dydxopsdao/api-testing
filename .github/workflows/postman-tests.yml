@@ -1,4 +1,4 @@
-name: Run Newman Tests with NordLayer VPN (Testnet)
+name: Run Newman Tests (Self-Hosted with Direct Access - Testnet)
 
 on:
   repository_dispatch:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-22.04
+    runs-on: self-hosted 
     permissions:
       contents: write
     steps:
@@ -14,184 +14,63 @@ jobs:
         uses: actions/checkout@v4.2.2
         with:
           persist-credentials: true
-          lfs: true # Explicitly ensure LFS is handled, though it's default
 
       - name: Update Last Processed Upstream Run ID
-        # ... (this step using stash is likely fine now, focus on the .deb issue)
         run: |
           echo "Updating .last_upstream_run_id.txt with ${{ github.event.client_payload.run_id }}"
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          echo "Stashing local changes before pull..."
-          git stash push -u -m "workflow_stash_run_id" || echo "No changes to stash or stash failed."
+          
+          echo "Checking git status before stash:"
+          git status --short
+
+          echo "Stashing local changes..."
+          git stash push -u -m "workflow_stash_for_run_id_update" || echo "No changes to stash or stash failed."
+          
           echo "Pulling with rebase..."
           git pull --rebase
-          echo "Popping stash..."
+          
+          echo "Attempting to pop stash..."
           if git rev-parse -q --verify refs/stash >/dev/null; then
             git stash pop || (
-              echo "Warning: Stash pop failed. Re-applying .last_upstream_run_id.txt manually."
+              echo "Warning: 'git stash pop' failed. Re-applying .last_upstream_run_id.txt manually."
               echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
               git add .last_upstream_run_id.txt 
-              git stash drop || echo "No stash to drop."
+              git stash drop || echo "No stash to drop or already dropped."
             )
           else
-            echo "No stash to pop. Ensuring .last_upstream_run_id.txt content."
+            echo "No stash found to pop. Ensuring .last_upstream_run_id.txt content."
             echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
             git add .last_upstream_run_id.txt
           fi
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
+          
+          echo "Committing .last_upstream_run_id.txt..."
+          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID."
+          
+          echo "Pushing changes..."
           git push
 
-      - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
-        id: install_deps
+      - name: Install Newman and
         run: |
-          npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
-          echo "System Info:"
-          lsb_release -a
-          uname -m
-
-          DEB_FILE_PATH="./nordlayer/nordlayer_3.3.5_amd64.deb"
-          echo "--- Diagnostics for $DEB_FILE_PATH ---"
-          if [ ! -f "$DEB_FILE_PATH" ]; then
-            echo "ERROR: $DEB_FILE_PATH not found after checkout!"
-            exit 1
+          # Check if Newman is installed, install if not
+          if ! command -v newman &> /dev/null; then
+            echo "Newman not found, installing..."
+            npm install -g newman newman-reporter-htmlextra
+          else
+            echo "Newman already installed."
           fi
-          echo "File details:"
-          ls -lh "$DEB_FILE_PATH"
-          echo "File type output:"
-          file "$DEB_FILE_PATH"
           
-          echo "Git LFS check for $DEB_FILE_PATH:"
-          # Check if the file content is an LFS pointer
-          if head -n 1 "$DEB_FILE_PATH" | grep -qE "^version https://git-lfs.github.com/spec/v1"; then
-            echo "The file $DEB_FILE_PATH appears to be an LFS pointer. This is likely the problem."
-            echo "Attempting 'git lfs pull' to fetch actual LFS content..."
-            # Ensure git-lfs is installed and initialized for the repo
-            # (actions/checkout usually handles this, but being explicit can help diagnose)
-            git lfs install --skip-repo # Ensures LFS commands are available
-            git lfs pull
-            echo "Re-checking file type after 'git lfs pull':"
-            ls -lh "$DEB_FILE_PATH"
-            file "$DEB_FILE_PATH"
-            # Verify it's no longer a pointer
-            if head -n 1 "$DEB_FILE_PATH" | grep -qE "^version https://git-lfs.github.com/spec/v1"; then
-                echo "ERROR: File is STILL an LFS pointer after 'git lfs pull'. LFS checkout failed."
-                exit 1
-            else
-                echo "File appears to be actual content after 'git lfs pull'."
-            fi
-          else
-            echo "File $DEB_FILE_PATH does not appear to be an LFS pointer based on its first line."
-          fi
-          echo "--- End Diagnostics ---"
 
-          echo "Attempting to install NordLayer directly from $DEB_FILE_PATH..."
-          # Remove any existing nordlayer packages to ensure a clean install from the .deb
-          sudo apt-get remove -y nordlayer nordlayer-latest nordlayer-tray || echo "No existing nordlayer packages to remove, or removal failed (which is ok)."
-          sudo dpkg -i "$DEB_FILE_PATH"
-          echo "Resolving dependencies for the directly installed NordLayer package..."
-          sudo apt-get update -y 
-          sudo apt-get install -f -y 
-          
-          # ... (Rest of the service start and stability check logic from previous correct version)
-          echo "Reloading systemd daemon..."
-          sudo systemctl daemon-reload
-          echo "Attempting to stop NordLayer service (if running)..."
-          sudo systemctl stop nordlayer.service || true
-          echo "Resetting any failed state for nordlayer.service..."
-          sudo systemctl reset-failed nordlayer.service || true 
-          echo "Attempting to start NordLayer service..."
-          if ! sudo systemctl start nordlayer.service; then
-            echo "ERROR: Initial 'systemctl start nordlayer.service' command failed."
-            sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100
-            exit 1
-          fi
-          echo "Initial 'systemctl start nordlayer.service' command completed."
-          echo "Checking NordLayer service stability (approx 15-20s)..."
-          STABLE_SECONDS_REQUIRED=10 
-          CHECK_INTERVAL=5
-          MAX_TOTAL_WAIT_SECONDS=30
-          ELAPSED_WAIT_SECONDS=0
-          SERVICE_CONFIRMED_STABLE=false
-          sleep 2
-          while [ $ELAPSED_WAIT_SECONDS -lt $MAX_TOTAL_WAIT_SECONDS ]; do
-            if ! systemctl is-active --quiet nordlayer.service; then
-              echo "Service is NOT active. Failing stability check."
-              SERVICE_CONFIRMED_STABLE=false; break
-            fi
-            CURRENT_NRESTARTS=$(systemctl show nordlayer.service --property=NRestarts --value)
-            echo "Service active. Current NRestarts: $CURRENT_NRESTARTS"
-            if [ "$CURRENT_NRESTARTS" -gt 1 ]; then 
-                 echo "Service has NRestarts=$CURRENT_NRESTARTS. Instability detected."
-                 SERVICE_CONFIRMED_STABLE=false; break 
-            fi
-            if [ $ELAPSED_WAIT_SECONDS -ge $STABLE_SECONDS_REQUIRED ]; then
-                echo "Service stable for $ELAPSED_WAIT_SECONDS seconds with NRestarts=$CURRENT_NRESTARTS."
-                SERVICE_CONFIRMED_STABLE=true; break
-            fi
-            sleep $CHECK_INTERVAL
-            ELAPSED_WAIT_SECONDS=$((ELAPSED_WAIT_SECONDS + CHECK_INTERVAL))
-          done
-          if [ "$SERVICE_CONFIRMED_STABLE" = false ]; then
-            echo "ERROR: NordLayer service did not achieve stable active state."
-            sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 200 
-            echo "--- Checking config /etc/nordlayer/config.hcl ---"
-            if sudo test -f /etc/nordlayer/config.hcl; then sudo cat /etc/nordlayer/config.hcl; else echo "Config not found."; fi
-            echo "--- Checking /var/log/nordlayer/ ---"
-            if sudo test -d /var/log/nordlayer; then sudo find /var/log/nordlayer/ -type f -exec echo "--- {} ---" \; -exec sudo cat {} \; ; else echo "Log dir not found."; fi
-            exit 1
-          fi
-          echo "NordLayer service confirmed STABLE and ACTIVE."
-          SOCKET_PATH="/run/nordlayer/nordlayer.sock"
-          echo "Checking for socket $SOCKET_PATH..."
-          sleep 1 
-          if sudo test -S "$SOCKET_PATH"; then
-            echo "SUCCESS: Socket $SOCKET_PATH found."
-            sudo chmod 666 "$SOCKET_PATH"
-            sudo ls -l "$SOCKET_PATH"
-          else
-            echo "CRITICAL ERROR: Socket $SOCKET_PATH not found/not a socket despite stable service."
-            sudo ls -la /run/nordlayer/; sudo systemctl status nordlayer.service --no-pager; sudo journalctl -xeu nordlayer.service -n 100
-            exit 1
-          fi
-          echo "End of Install Dependencies step. Pausing for 2s..."
-          sleep 2
 
-      # ... (Login to NordLayer VPN step and all subsequent steps remain the same as the last complete version)
-      - name: Login to NordLayer VPN
-        run: |
-          SOCKET_PATH="/run/nordlayer/nordlayer.sock"
-          echo "Login Step: Current user: $(whoami), Groups: $(groups)"
-          echo "Login Step: Verifying socket $SOCKET_PATH existence..."
-          if ! sudo test -S "$SOCKET_PATH"; then
-            echo "CRITICAL ERROR (Login Step): Socket $SOCKET_PATH is MISSING or not a socket!"
-            sudo ls -la /run/nordlayer/; sudo systemctl status nordlayer.service --no-pager; sudo journalctl -xeu nordlayer.service -n 100
-            exit 1
-          else
-            echo "Login Step: Socket $SOCKET_PATH FOUND. Permissions:"; sudo ls -l "$SOCKET_PATH"
-          fi
-          if ! nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"; then
-            echo "ERROR: nordlayer login command failed."
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100 
-            if sudo test -d /var/log/nordlayer; then echo "--- /var/log/nordlayer/ ---"; sudo find /var/log/nordlayer/ -type f -exec echo "--- {} ---" \; -exec sudo cat {} \; ; fi
-            exit 1
-          fi
-          echo "NordLayer login successful."
 
-      - name: Connect to NordLayer VPN
-        run: |
-          nordlayer gateways
-          nordlayer connect "dos-server-BQG2cKQV"
-          sleep 20 
-          echo "Verifying VPN IP..."
-          curl --max-time 10 ifconfig.me || echo "Warning: Could not verify external IP."
 
       - name: Run Newman Tests for Testnet
         id: newman
         run: |
+          # Ensure your postman/environment.testnet.json has the correct target URLs
+          # accessible from your self-hosted runner.
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
             --reporters cli,htmlextra,junit \
@@ -200,14 +79,7 @@ jobs:
           NEWMAN_EXIT_CODE=$?
           echo "Newman exit code: ${NEWMAN_EXIT_CODE}"
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
-        continue-on-error: true
-
-      - name: Disconnect from NordLayer VPN
-        if: always()
-        run: |
-          echo "Attempting to disconnect from NordLayer VPN..."
-          nordlayer status || true
-          nordlayer disconnect || echo "NordLayer already disconnected or failed to disconnect."
+        continue-on-error: true 
 
       - name: Upload Test Results (JUnit XML)
         if: always()
@@ -229,13 +101,16 @@ jobs:
         if: always()
         run: |
           NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code }}" 
-          JOB_STATUS="${{ job.status }}"
+          JOB_STATUS="${{ job.status }}" # GitHub Actions job status: success or failure
+
           FINAL_MESSAGE=""
-          ICON=":test_tube:" 
-          COLOR="warning" 
-          TITLE_TEXT="NordLayer & Newman Test Run (Testnet on ubuntu-22.04)"
+          ICON=":test_tube:" # Default icon
+          COLOR="warning"    # Default color
+          # Updated title
+          TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)" 
 
           if [ "$JOB_STATUS" == "success" ]; then
+            # Job succeeded, now check Newman's exit code
             if [ -z "$NEWMAN_EXIT_CODE" ] || [ "$NEWMAN_EXIT_CODE" -eq 0 ]; then
               FINAL_MESSAGE="All tests passed successfully!"
               ICON=":white_check_mark:"
@@ -243,15 +118,17 @@ jobs:
             else
               FINAL_MESSAGE="Newman tests completed but encountered failures (Exit Code: $NEWMAN_EXIT_CODE)."
               ICON=":warning:"
-              COLOR="danger" 
+              COLOR="danger" # Test failures are considered a 'danger' for Slack notification
             fi
           else 
-            FINAL_MESSAGE="Workflow step failed prior to or during Newman tests. Check Actions run."
+            # Job status is 'failure', meaning a step before or during Newman (but not Newman's own test failures) failed
+            FINAL_MESSAGE="Workflow step failed. Check Actions run."
             ICON=":x:"
             COLOR="danger"
           fi
           
           TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
+
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
             --arg username "GitHub Actions" \
@@ -261,16 +138,17 @@ jobs:
             --arg text "$TEXT_MESSAGE" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           
+          echo "Sending payload to Slack:"
           echo "$PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-          # Final check to mark job as failed if necessary
+          # Final check to mark job as failed in GitHub Actions UI if necessary
           if [ "$JOB_STATUS" == "failure" ]; then
             echo "Job failed at a previous step."
-            exit 1
+            exit 1 # Ensure GitHub Actions marks the job as failed
           elif [ -n "$NEWMAN_EXIT_CODE" ] && [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
             echo "Newman tests failed. Marking job as failed."
-            exit 1
+            exit 1 # Ensure GitHub Actions marks the job as failed due to Newman test failures
           else
             echo "Job and tests (if applicable) successful."
           fi
