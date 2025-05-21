@@ -80,7 +80,7 @@ jobs:
           path: newman-report.html
           if-no-files-found: warn
 
-            - name: Notify Slack Channel and Handle Overall Job Failure
+      - name: Notify Slack Channel and Handle Overall Job Failure
         if: always() # Ensure this step always runs to determine final job status
         run: |
           NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" 
