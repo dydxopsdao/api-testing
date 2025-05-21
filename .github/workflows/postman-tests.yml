@@ -51,21 +51,7 @@ jobs:
           
           echo "Pushing changes..."
           git push
-
-      - name: Install Newman and
-        run: |
-          # Check if Newman is installed, install if not
-          if ! command -v newman &> /dev/null; then
-            echo "Newman not found, installing..."
-            npm install -g newman newman-reporter-htmlextra
-          else
-            echo "Newman already installed."
-          fi
           
-
-
-
-
       - name: Run Newman Tests for Testnet
         id: newman
         run: |
