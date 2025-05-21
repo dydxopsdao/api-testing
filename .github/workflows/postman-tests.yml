@@ -52,16 +52,16 @@ jobs:
           echo "Pushing changes..."
           git push
           
-      - name: Run Newman Tests for Testnet
+      - name: Run Newman Tests for Testnet (Diagnosing HTML reporter)
         id: newman
         run: |
           echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI and JUnit only)..."
           
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
-            --reporters cli,junit \ # <-- REMOVED htmlextra HERE
+            --reporters cli,junit \
             --reporter-junit-export results.xml 
-            # --reporter-htmlextra-export newman-report.html # <-- COMMENTED OUT or REMOVED
+          # HTML extra reporter line fully removed for this test
           
           NEWMAN_EXIT_CODE=$?
           echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command finished. Exit code: ${NEWMAN_EXIT_CODE}"
@@ -88,37 +88,59 @@ jobs:
           if-no-files-found: warn
 
       - name: Notify Slack Channel and Handle Failure
-        if: always()
+        if: always() # This ensures it runs
         run: |
-          NEWMAN_EXIT_CODE="${{ steps.newman.outputs.exit_code }}" 
-          JOB_STATUS="${{ job.status }}" # GitHub Actions job status: success or failure
+          # NEWMAN_EXIT_CODE comes from steps.newman.outputs.exit_code
+          # If the Newman step itself fails (like with a script error), 
+          # steps.newman.outputs.exit_code might not be set or might be empty.
+          # We should also check the step's own conclusion.
+          
+          NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" # success, failure, skipped, etc.
+          NEWMAN_TEST_EXIT_CODE="${{ steps.newman.outputs.exit_code }}" # Newman's internal exit code
+
+          JOB_OVERALL_STATUS="${{ job.status }}" # Overall job status so far
 
           FINAL_MESSAGE=""
-          ICON=":test_tube:" # Default icon
-          COLOR="warning"    # Default color
-          # Updated title
-          TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)" 
+          ICON=":test_tube:" 
+          COLOR="warning" 
+          TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)"
+          WILL_FAIL_JOB=false
 
-          if [ "$JOB_STATUS" == "success" ]; then
-            # Job succeeded, now check Newman's exit code
-            if [ -z "$NEWMAN_EXIT_CODE" ] || [ "$NEWMAN_EXIT_CODE" -eq 0 ]; then
-              FINAL_MESSAGE="All tests passed successfully!"
+          if [ "$NEWMAN_STEP_CONCLUSION" == "failure" ]; then
+            FINAL_MESSAGE="Newman step failed to execute correctly (e.g., script error)."
+            ICON=":x:"
+            COLOR="danger"
+            WILL_FAIL_JOB=true
+          elif [ "$NEWMAN_STEP_CONCLUSION" == "success" ]; then
+            if [ -z "$NEWMAN_TEST_EXIT_CODE" ] || [ "$NEWMAN_TEST_EXIT_CODE" -eq 0 ]; then
+              FINAL_MESSAGE="All Newman tests passed successfully!"
               ICON=":white_check_mark:"
               COLOR="good"
             else
-              FINAL_MESSAGE="Newman tests completed but encountered failures (Exit Code: $NEWMAN_EXIT_CODE)."
+              FINAL_MESSAGE="Newman tests completed but encountered test failures (Newman Exit Code: $NEWMAN_TEST_EXIT_CODE)."
               ICON=":warning:"
-              COLOR="danger" # Test failures are considered a 'danger' for Slack notification
+              COLOR="danger" 
+              WILL_FAIL_JOB=true
             fi
-          else 
-            # Job status is 'failure', meaning a step before or during Newman (but not Newman's own test failures) failed
-            FINAL_MESSAGE="Workflow step failed. Check Actions run."
-            ICON=":x:"
-            COLOR="danger"
+          else # Skipped or cancelled
+            FINAL_MESSAGE="Newman step was $NEWMAN_STEP_CONCLUSION."
+            ICON=":zzz:"
+            COLOR="neutral"
+            # If prior steps caused the job to fail, we still want the job to be red
+            if [ "$JOB_OVERALL_STATUS" == "failure" ]; then
+                WILL_FAIL_JOB=true
+            fi
           fi
           
-          TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
+          # Append overall job status if it already failed before this notification step
+          if [ "$JOB_OVERALL_STATUS" == "failure" ] && [ "$NEWMAN_STEP_CONCLUSION" != "failure" ]; then
+             FINAL_MESSAGE="A previous step in the job failed. $FINAL_MESSAGE"
+             ICON=":x:"
+             COLOR="danger"
+             WILL_FAIL_JOB=true # Ensure job stays failed
+          fi
 
+          TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
           PAYLOAD=$(jq -n \
             --arg channel "indexer-api-testing" \
             --arg username "GitHub Actions" \
@@ -128,17 +150,12 @@ jobs:
             --arg text "$TEXT_MESSAGE" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           
-          echo "Sending payload to Slack:"
           echo "$PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-          # Final check to mark job as failed in GitHub Actions UI if necessary
-          if [ "$JOB_STATUS" == "failure" ]; then
-            echo "Job failed at a previous step."
-            exit 1 # Ensure GitHub Actions marks the job as failed
-          elif [ -n "$NEWMAN_EXIT_CODE" ] && [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
-            echo "Newman tests failed. Marking job as failed."
-            exit 1 # Ensure GitHub Actions marks the job as failed due to Newman test failures
+          if [ "$WILL_FAIL_JOB" = true ]; then
+            echo "Marking job as failed based on Newman step conclusion or test exit code."
+            exit 1
           else
-            echo "Job and tests (if applicable) successful."
+            echo "Job successful."
           fi
