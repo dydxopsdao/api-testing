@@ -52,28 +52,21 @@ jobs:
           echo "Pushing changes..."
           git push
           
-      - name: Run Newman Tests for Testnet (CLI Only with DEBUG)
-        id: newman
+      - name: Run Newman Tests for Testnet (CLI Only - Minimal Script)
+        id: newman # Keep ID for consistency, though we won't set output here
         run: |
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI only, DEBUG enabled)..."
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI only, MINIMAL SCRIPT)..."
           
-          # Enable debug logging for Newman and potentially related modules
-          export DEBUG="newman:*,postman-runtime:*" 
-
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
             --reporters cli 
+            # No file reporters (no --reporter-junit-export, no --reporter-htmlextra-export)
           
-          NEWMAN_EXIT_CODE=$?
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command finished. Exit code from tests: ${NEWMAN_EXIT_CODE}"
-          
-          # Unset DEBUG if you don't want it for subsequent commands in this block (though there are none here)
-          # unset DEBUG
-          
-          echo "Setting GitHub output variable 'exit_code'..."
-          echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] GitHub output set. Newman script block finished."
-        continue-on-error: true
+          # Directly after Newman, just echo and let the script end.
+          # We are temporarily removing the NEWMAN_EXIT_CODE capture and GITHUB_OUTPUT setting.
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command (CLI only) has finished executing in the script."
+          echo "Script block now ending."
+        continue-on-error: true # Keep for now so we can see if subsequent steps run
 
       - name: Upload Test Results (JUnit XML)
         if: always()
