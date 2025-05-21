@@ -23,12 +23,36 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          echo "Checking git status before stash:"
+          echo "Current git status before any operations:"
           git status --short
 
-          echo "Stashing local changes..."
-          git stash push -u -m "workflow_stash_for_run_id_update" || echo "No changes to stash or stash failed."
+          # If LFS files are causing "unstaged changes" issues for rebase:
+          # Attempt to clean the working directory, resetting any unexpected changes to LFS files
+          # or other files, *except* for the one we just modified.
+          echo "Staging the intended change to .last_upstream_run_id.txt"
+          git add .last_upstream_run_id.txt
+
+          echo "Stashing all changes (including our staged one and any untracked files)..."
+          # This will stash our staged change and any other modifications/untracked files.
+          git stash push -u -m "workflow_stash_for_run_id_update"
           
+          # After stashing, the working directory *should* be clean.
+          # If LFS files were the source of "unstaged changes" for rebase,
+          # and stashing them converted them to pointers correctly, this might be enough.
+          echo "Git status after stash (should be clean):"
+          git status --short
+
+          # Double-check LFS status - this might show if LFS files are still "dirty"
+          echo "Checking Git LFS status:"
+          git lfs status || echo "git lfs status command failed or LFS not in use."
+
+          # If 'git lfs status' still shows modifications, try to clean LFS files.
+          # This step assumes that any "modified" LFS files should actually be reset to their clean (pointer or full content) state from HEAD.
+          # Be cautious with 'git lfs checkout .' if you have other intentional LFS modifications you wanted to keep.
+          # For this specific workflow step, it's likely safe.
+          # git lfs fsck # Check for LFS inconsistencies
+          # git lfs checkout . # This attempts to fix LFS files to match the index
+
           echo "Pulling with rebase..."
           git pull --rebase
           
@@ -37,15 +61,17 @@ jobs:
             git stash pop || (
               echo "Warning: 'git stash pop' failed. Re-applying .last_upstream_run_id.txt manually."
               echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+              # It's important to re-add after manually changing if pop failed
+              git add .last_upstream_run_id.txt 
               git stash drop || echo "No stash to drop or already dropped."
             )
           else
             echo "No stash found to pop. Ensuring .last_upstream_run_id.txt content."
             echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+            git add .last_upstream_run_id.txt # Re-add if created fresh
           fi
           
-          echo "Adding and committing .last_upstream_run_id.txt..."
-          git add .last_upstream_run_id.txt
+          echo "Committing .last_upstream_run_id.txt..."
           git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID."
           
           echo "Pushing changes..."
