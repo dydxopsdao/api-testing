@@ -58,8 +58,7 @@ jobs:
           # The only command in this block is newman.
           # The script will exit with Newman's exit code.
           newman run postman/collection.json \
-            -e postman/environment.testnet.json \
-            --reporters cli
+            -e postman/environment.testnet.json 
         # No NEWMAN_EXIT_CODE=$?
         # No echo "exit_code=..." >> $GITHUB_OUTPUT
         # No other echos after newman
