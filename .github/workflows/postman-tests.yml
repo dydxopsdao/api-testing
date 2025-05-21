@@ -52,19 +52,23 @@ jobs:
           echo "Pushing changes..."
           git push
           
-      - name: Run Newman Tests for Testnet (Diagnosing Reporter Hang - CLI Only) # Changed name slightly for clarity
+      - name: Run Newman Tests for Testnet (CLI Only with DEBUG)
         id: newman
         run: |
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI only)..."
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI only, DEBUG enabled)..."
           
+          # Enable debug logging for Newman and potentially related modules
+          export DEBUG="newman:*,postman-runtime:*" 
+
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
             --reporters cli 
-          # JUnit reporter line fully removed for this test
-          # HTML extra reporter line was already removed
           
           NEWMAN_EXIT_CODE=$?
           echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command finished. Exit code from tests: ${NEWMAN_EXIT_CODE}"
+          
+          # Unset DEBUG if you don't want it for subsequent commands in this block (though there are none here)
+          # unset DEBUG
           
           echo "Setting GitHub output variable 'exit_code'..."
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
