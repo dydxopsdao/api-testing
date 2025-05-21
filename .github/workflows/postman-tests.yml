@@ -82,12 +82,13 @@ jobs:
 
       - name: Notify Slack Channel and Handle Overall Job Failure
         if: always() # This step will always run
+        env: # Define environment variables for this step
+          NEWMAN_CONCLUSION: ${{ steps.newman.conclusion }}
+          JOB_SUCCESS_RAW: ${{ success() }} # This will be "True" or "False"
         run: |
-          NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" # success, failure, skipped, cancelled
-          
-          # Get the boolean success status from GitHub Actions context
-          # It will be the string "True" or "False"
-          OVERALL_JOB_SUCCESS_SO_FAR_RAW="${{ success() }}" 
+          # Now use the environment variables directly in the script
+          echo "Newman Step Conclusion from ENV: $NEWMAN_CONCLUSION"
+          echo "Overall Job Success So Far (Raw from ENV): $JOB_SUCCESS_RAW"
           
           FINAL_MESSAGE=""
           ICON=":test_tube:" 
@@ -95,52 +96,42 @@ jobs:
           TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)"
           MARK_JOB_AS_FAILED_FLAG=false # Our flag to exit 1
 
-          echo "Newman Step Conclusion: $NEWMAN_STEP_CONCLUSION"
-          echo "Overall Job Success So Far (Raw from GitHub context): $OVERALL_JOB_SUCCESS_SO_FAR_RAW"
-
           # Determine status based on Newman step
-          if [ "$NEWMAN_STEP_CONCLUSION" == "success" ]; then
+          if [ "$NEWMAN_CONCLUSION" == "success" ]; then
             FINAL_MESSAGE="All Newman tests passed successfully!"
             ICON=":white_check_mark:"
             COLOR="good"
-            # MARK_JOB_AS_FAILED_FLAG remains false if OVERALL_JOB_SUCCESS_SO_FAR_RAW is "True"
-            if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ]; then
-              MARK_JOB_AS_FAILED_FLAG=true # A previous required step failed
+            if [ "$JOB_SUCCESS_RAW" == "False" ]; then
+              MARK_JOB_AS_FAILED_FLAG=true 
             fi
-          elif [ "$NEWMAN_STEP_CONCLUSION" == "failure" ]; then
+          elif [ "$NEWMAN_CONCLUSION" == "failure" ]; then
             FINAL_MESSAGE="Newman tests encountered failures (Newman command exited non-zero)."
             ICON=":warning:"
             COLOR="danger" 
-            MARK_JOB_AS_FAILED_FLAG=true # Newman failure means job fails
-          elif [ "$NEWMAN_STEP_CONCLUSION" == "skipped" ]; then
-            FINAL_MESSAGE="Newman step was skipped." # Usually due to a prior *required* step failing
+            MARK_JOB_AS_FAILED_FLAG=true
+          elif [ "$NEWMAN_CONCLUSION" == "skipped" ]; then
+            FINAL_MESSAGE="Newman step was skipped."
             ICON=":zzz:"
             COLOR="neutral"
-            # If a previous required step failed, OVERALL_JOB_SUCCESS_SO_FAR_RAW will be "False"
-            if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ]; then
+            if [ "$JOB_SUCCESS_RAW" == "False" ]; then
                 MARK_JOB_AS_FAILED_FLAG=true
             fi
           else # cancelled, etc.
-            FINAL_MESSAGE="Newman step status: $NEWMAN_STEP_CONCLUSION. This might be due to job cancellation or an unknown issue."
+            FINAL_MESSAGE="Newman step status: $NEWMAN_CONCLUSION. This might be due to job cancellation or an unknown issue."
             ICON=":grey_question:"
             COLOR="neutral"
-            # If the job was already failing/cancelled, mark it as failed.
-            if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ] || [ "$NEWMAN_STEP_CONCLUSION" == "cancelled" ]; then
+            if [ "$JOB_SUCCESS_RAW" == "False" ] || [ "$NEWMAN_CONCLUSION" == "cancelled" ]; then
                 MARK_JOB_AS_FAILED_FLAG=true
             fi
           fi
           
-          # Check if the job failed *before* the Newman step (if Newman didn't already cause a failure mark)
-          # The newman step has continue-on-error, so success() reflects steps *before* it mainly.
-          if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ] && [ "$MARK_JOB_AS_FAILED_FLAG" = false ]; then
+          if [ "$JOB_SUCCESS_RAW" == "False" ] && [ "$MARK_JOB_AS_FAILED_FLAG" = false ]; then
              FINAL_MESSAGE="A previous required step in the job failed. $FINAL_MESSAGE"
              ICON=":x:" 
              COLOR="danger"
              MARK_JOB_AS_FAILED_FLAG=true
-          elif [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ] && [ "$NEWMAN_STEP_CONCLUSION" != "failure" ]; then
-             # If a previous step failed, and Newman didn't explicitly fail but also didn't succeed (e.g. skipped)
-             # Ensure the message reflects the prior failure more prominently.
-             FINAL_MESSAGE="A previous required step in the job failed. Current Newman status: $NEWMAN_STEP_CONCLUSION."
+          elif [ "$JOB_SUCCESS_RAW" == "False" ] && [ "$NEWMAN_CONCLUSION" != "failure" ]; then
+             FINAL_MESSAGE="A previous required step in the job failed. Current Newman status: $NEWMAN_CONCLUSION."
              ICON=":x:" 
              COLOR="danger"
              MARK_JOB_AS_FAILED_FLAG=true
