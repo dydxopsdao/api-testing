@@ -2615,8 +2615,6 @@
 											"            \"items\": {",
 											"                \"type\": \"object\",",
 											"                \"required\": [",
-											"                    \"id\", ",
-											"                    \"subaccountId\", ",
 											"                    \"equity\", ",
 											"                    \"totalPnl\", ",
 											"                    \"netTransfers\", ",
@@ -2625,8 +2623,6 @@
 											"                    \"blockTime\"",
 											"                ],",
 											"                \"properties\": {",
-											"                    \"id\": { \"type\": \"string\" },",
-											"                    \"subaccountId\": { \"type\": \"string\" },",
 											"                    \"equity\": { \"type\": \"string\" },",
 											"                    \"totalPnl\": { \"type\": \"string\" },",
 											"                    \"netTransfers\": { \"type\": \"string\" },",
@@ -4835,46 +4831,63 @@
 											"    pm.expect(responseJson).to.have.property(\"megavaultPnl\").that.is.an(\"array\");",
 											"});",
 											"",
-											"// 4. Ensure `megavaultPnl` is not empty",
+											"// 4. Ensure `megavaultPnl` is not empty (if applicable, or adjust if it can be empty)",
 											"pm.test(\"'megavaultPnl' array is not empty\", function () {",
-											"    const { megavaultPnl } = pm.response.json();",
-											"    pm.expect(megavaultPnl.length).to.be.above(",
-											"        0,",
-											"        \"Expected at least one historicalPnl record, but got none.\"",
-											"    );",
+											"    const responseJson = pm.response.json(); // Parse it fresh or ensure it's available",
+											"    // First, ensure megavaultPnl exists and is an array before checking its length",
+											"    if (responseJson && responseJson.megavaultPnl && Array.isArray(responseJson.megavaultPnl)) {",
+											"        pm.expect(responseJson.megavaultPnl.length).to.be.above(",
+											"            0,",
+											"            \"Expected at least one 'megavaultPnl' record, but got none.\" // Corrected message",
+											"        );",
+											"    } else {",
+											"        // If it can be legitimately empty or missing, this part might need adjustment",
+											"        // For now, if it's missing and expected, let's fail clearly.",
+											"        pm.expect.fail(\"Response does not contain a 'megavaultPnl' array or it's not an array.\");",
+											"    }",
 											"});",
 											"",
 											"// 5. Validate each record's structure",
 											"pm.test(\"Validate structure of each record in 'megavaultPnl'\", function () {",
-											"    const { megavaultPnl } = pm.response.json();",
+											"    const responseJson = pm.response.json();",
 											"    ",
-											"    megavaultPnl.forEach((record, index) => {",
-											"        pm.expect(record).to.be.an(\"object\");",
+											"    // It's good practice to check if megavaultPnl exists and has items before iterating",
+											"    // Test #4 should ideally cover the \"not empty\" part, but an extra check here is robust",
+											"    if (!responseJson.megavaultPnl || responseJson.megavaultPnl.length === 0) {",
+											"        // If test #4 already asserts it's not empty, this condition might not be hit often",
+											"        // Or, you could remove this check if test #4 is deemed sufficient",
+											"        console.warn(\"Skipping record structure validation as 'megavaultPnl' is empty or missing.\");",
+											"        return; // Exit this test if no records to validate",
+											"    }",
 											"",
-											"        // Required properties",
-											"        pm.expect(record).to.have.property(\"id\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"subaccountId\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"equity\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"totalPnl\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"netTransfers\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"createdAt\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"blockHeight\").that.is.a(\"string\");",
-											"        pm.expect(record).to.have.property(\"blockTime\").that.is.a(\"string\");",
+											"    responseJson.megavaultPnl.forEach((record, index) => {",
+											"        pm.test(`Record ${index} has correct structure`, function() { // Individual test per record",
+											"            pm.expect(record).to.be.an(\"object\");",
 											"",
-											"        // Check numeric fields are indeed parseable as numbers",
-											"        pm.expect(parseFloat(record.equity)).to.not.be.NaN;",
-											"        pm.expect(parseFloat(record.totalPnl)).to.not.be.NaN;",
-											"        pm.expect(parseFloat(record.netTransfers)).to.not.be.NaN;",
+											"            // Required properties based on YOUR PROVIDED JSON",
+											"            pm.expect(record, `Record ${index} missing 'equity'`).to.have.property(\"equity\").that.is.a(\"string\");",
+											"            pm.expect(record, `Record ${index} missing 'totalPnl'`).to.have.property(\"totalPnl\").that.is.a(\"string\");",
+											"            pm.expect(record, `Record ${index} missing 'netTransfers'`).to.have.property(\"netTransfers\").that.is.a(\"string\");",
+											"            pm.expect(record, `Record ${index} missing 'createdAt'`).to.have.property(\"createdAt\").that.is.a(\"string\");",
+											"            pm.expect(record, `Record ${index} missing 'blockHeight'`).to.have.property(\"blockHeight\").that.is.a(\"string\");",
+											"            pm.expect(record, `Record ${index} missing 'blockTime'`).to.have.property(\"blockTime\").that.is.a(\"string\");",
 											"",
-											"        // Check blockHeight looks parseable as an integer",
-											"        pm.expect(parseInt(record.blockHeight, 10)).to.not.be.NaN;",
 											"",
-											"        // Check date fields are valid",
-											"        const createdDate = new Date(record.createdAt);",
-											"        pm.expect(createdDate.toString()).not.to.equal(\"Invalid Date\");",
+											"            // Check numeric fields are indeed parseable as numbers",
+											"            pm.expect(parseFloat(record.equity), `Record ${index} 'equity' is not a valid number`).to.not.be.NaN;",
+											"            pm.expect(parseFloat(record.totalPnl), `Record ${index} 'totalPnl' is not a valid number`).to.not.be.NaN;",
+											"            pm.expect(parseFloat(record.netTransfers), `Record ${index} 'netTransfers' is not a valid number`).to.not.be.NaN;",
 											"",
-											"        const blockDate = new Date(record.blockTime);",
-											"        pm.expect(blockDate.toString()).not.to.equal(\"Invalid Date\");",
+											"            // Check blockHeight looks parseable as an integer",
+											"            pm.expect(parseInt(record.blockHeight, 10), `Record ${index} 'blockHeight' is not a valid integer`).to.not.be.NaN;",
+											"",
+											"            // Check date fields are valid",
+											"            const createdDate = new Date(record.createdAt);",
+											"            pm.expect(createdDate.toString(), `Record ${index} 'createdAt' is not a valid date`).not.to.equal(\"Invalid Date\");",
+											"",
+											"            const blockDate = new Date(record.blockTime);",
+											"            pm.expect(blockDate.toString(), `Record ${index} 'blockTime' is not a valid date`).not.to.equal(\"Invalid Date\");",
+											"        });",
 											"    });",
 											"});",
 											"",
@@ -4886,11 +4899,10 @@
 											"        properties: {",
 											"            megavaultPnl: {",
 											"                type: \"array\",",
+											"                minItems: 0,",
 											"                items: {",
 											"                    type: \"object\",",
 											"                    required: [",
-											"                        \"id\",",
-											"                        \"subaccountId\",",
 											"                        \"equity\",",
 											"                        \"totalPnl\",",
 											"                        \"netTransfers\",",
@@ -4899,23 +4911,21 @@
 											"                        \"blockTime\"",
 											"                    ],",
 											"                    properties: {",
-											"                        id: { type: \"string\" },",
-											"                        subaccountId: { type: \"string\" },",
-											"                        equity: { type: \"string\" },",
-											"                        totalPnl: { type: \"string\" },",
-											"                        netTransfers: { type: \"string\" },",
+											"                        equity: { type: \"string\", pattern: \"^-?[0-9]+$\" },",
+											"                        totalPnl: { type: \"string\", pattern: \"^-?[0-9]+$\" },",
+											"                        netTransfers: { type: \"string\", pattern: \"^-?[0-9]+$\" },",
 											"                        createdAt: { type: \"string\", format: \"date-time\" },",
-											"                        blockHeight: { type: \"string\" },",
+											"                        blockHeight: { type: \"string\", pattern: \"^[0-9]+$\" },",
 											"                        blockTime: { type: \"string\", format: \"date-time\" }",
-											"                    }",
+											"                    },",
+											"                    additionalProperties: false",
 											"                }",
 											"            }",
 											"        }",
 											"    };",
 											"",
 											"    pm.response.to.have.jsonSchema(schema);",
-											"});",
-											""
+											"});"
 										],
 										"type": "text/javascript",
 										"packages": {}
@@ -4981,8 +4991,6 @@
 											"      pm.expect(record).to.be.an(\"object\");",
 											"",
 											"      // Check required fields & types",
-											"      pm.expect(record).to.have.property(\"id\").that.is.a(\"string\");",
-											"      pm.expect(record).to.have.property(\"subaccountId\").that.is.a(\"string\");",
 											"      pm.expect(record).to.have.property(\"equity\").that.is.a(\"string\");",
 											"      pm.expect(record).to.have.property(\"totalPnl\").that.is.a(\"string\");",
 											"      pm.expect(record).to.have.property(\"netTransfers\").that.is.a(\"string\");",
@@ -5024,8 +5032,6 @@
 											"              items: {",
 											"                type: \"object\",",
 											"                required: [",
-											"                  \"id\",",
-											"                  \"subaccountId\",",
 											"                  \"equity\",",
 											"                  \"totalPnl\",",
 											"                  \"netTransfers\",",
@@ -5033,8 +5039,6 @@
 											"                  \"blockTime\"",
 											"                ],",
 											"                properties: {",
-											"                  id: { type: \"string\" },",
-											"                  subaccountId: { type: \"string\" },",
 											"                  equity: { type: \"string\" },",
 											"                  totalPnl: { type: \"string\" },",
 											"                  netTransfers: { type: \"string\" },",
@@ -5076,224 +5080,173 @@
 								}
 							},
 							"response": []
-						},
-						{
-							"name": "v1/vaults/historicalPnl Copy",
-							"event": [
-								{
-									"listen": "test",
-									"script": {
-										"exec": [
-											"// 1. Verify response status code is 200",
-											"pm.test(\"Response status code is 200\", function () {",
-											"    pm.response.to.have.status(200);",
-											"});",
-											"",
-											"// 2. Check that the response time is below a threshold (increase if needed for large data)",
-											"pm.test(\"Response time is less than 6000ms\", function () {",
-											"    pm.expect(pm.response.responseTime).to.be.below(6000);",
-											"});",
-											"",
-											"// 3. Parse the JSON & check top-level structure",
-											"pm.test(\"Response contains a 'positions' array\", function () {",
-											"    const jsonData = pm.response.json();",
-											"    pm.expect(jsonData).to.be.an(\"object\");",
-											"    pm.expect(jsonData).to.have.property(\"positions\").that.is.an(\"array\");",
-											"});",
-											"",
-											"// 4. Validate each position in the 'positions' array",
-											"pm.test(\"Validate each position's structure\", function () {",
-											"    const { positions } = pm.response.json();",
-											"",
-											"    positions.forEach((position, index) => {",
-											"        // a) 'ticker' is required and should be a string",
-											"        pm.expect(position).to.have.property(\"ticker\").that.is.a(\"string\");",
-											"",
-											"        // b) 'equity' is typically a string representation of a number",
-											"        pm.expect(position).to.have.property(\"equity\").that.is.a(\"string\");",
-											"        pm.expect(parseFloat(position.equity), `equity parseFloat fail at index ${index}`)",
-											"            .to.not.be.NaN;",
-											"",
-											"        // c) Check 'assetPosition' if present",
-											"        if (position.hasOwnProperty(\"assetPosition\") && position.assetPosition !== null) {",
-											"            const assetPos = position.assetPosition;",
-											"            // Basic required fields in assetPosition (based on your snippet)",
-											"            pm.expect(assetPos).to.be.an(\"object\");",
-											"            pm.expect(assetPos).to.have.property(\"size\").that.is.a(\"string\");",
-											"            pm.expect(assetPos).to.have.property(\"symbol\").that.is.a(\"string\");",
-											"            pm.expect(assetPos).to.have.property(\"side\").that.is.a(\"string\"); // e.g., \"LONG\"",
-											"            pm.expect(assetPos).to.have.property(\"assetId\").that.is.a(\"string\");",
-											"            pm.expect(assetPos).to.have.property(\"subaccountNumber\").that.is.a(\"number\");",
-											"",
-											"            // Validate numeric parse",
-											"            pm.expect(parseFloat(assetPos.size), `assetPosition.size parseFloat fail at index ${index}`)",
-											"                .to.not.be.NaN;",
-											"        }",
-											"",
-											"        // d) Check 'perpetualPosition' if present",
-											"        if (position.hasOwnProperty(\"perpetualPosition\") && position.perpetualPosition !== null) {",
-											"            const perpPos = position.perpetualPosition;",
-											"            // Required fields from the snippet",
-											"            pm.expect(perpPos).to.be.an(\"object\");",
-											"            pm.expect(perpPos).to.have.property(\"market\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"status\").that.is.a(\"string\"); // e.g. \"OPEN\", \"CLOSED\"",
-											"            pm.expect(perpPos).to.have.property(\"side\").that.is.a(\"string\");   // e.g. \"LONG\", \"SHORT\"",
-											"            pm.expect(perpPos).to.have.property(\"size\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"maxSize\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"entryPrice\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"exitPrice\"); // can be null or string",
-											"            pm.expect(",
-											"                perpPos.exitPrice === null || typeof perpPos.exitPrice === \"string\",",
-											"                `\"exitPrice\" must be null or a string (pos index ${index})`",
-											"            ).to.be.true;",
-											"            pm.expect(perpPos).to.have.property(\"realizedPnl\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"unrealizedPnl\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"createdAt\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"createdAtHeight\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"closedAt\"); // null or string",
-											"            pm.expect(perpPos).to.have.property(\"sumOpen\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"sumClose\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"netFunding\").that.is.a(\"string\");",
-											"            pm.expect(perpPos).to.have.property(\"subaccountNumber\").that.is.a(\"number\");",
-											"",
-											"            // e) Validate numeric parse for perpetual fields",
-											"            [",
-											"                \"size\",",
-											"                \"maxSize\",",
-											"                \"entryPrice\",",
-											"                \"realizedPnl\",",
-											"                \"unrealizedPnl\",",
-											"                \"sumOpen\",",
-											"                \"sumClose\",",
-											"                \"netFunding\"",
-											"            ].forEach(key => {",
-											"                pm.expect(parseFloat(perpPos[key]), `${key} parseFloat fail at index ${index}`).to.not.be.NaN;",
-											"            });",
-											"            // exitPrice can be null or string",
-											"            if (perpPos.exitPrice !== null) {",
-											"                pm.expect(parseFloat(perpPos.exitPrice)).to.not.be.NaN;",
-											"            }",
-											"",
-											"            // f) Date/time validations",
-											"            const createdAtDate = new Date(perpPos.createdAt);",
-											"            pm.expect(createdAtDate.toString()).not.to.equal(\"Invalid Date\");",
-											"            if (perpPos.closedAt !== null) {",
-											"                const closedAtDate = new Date(perpPos.closedAt);",
-											"                pm.expect(closedAtDate.toString()).not.to.equal(\"Invalid Date\");",
-											"            }",
-											"",
-											"            // g) Enumerations for 'status' & 'side'",
-											"            const validStatuses = [\"OPEN\", \"CLOSED\"];",
-											"            const validSides = [\"LONG\", \"SHORT\"];",
-											"            pm.expect(validStatuses, `Invalid 'status' at index ${index}`).to.include(perpPos.status);",
-											"            pm.expect(validSides, `Invalid 'side' at index ${index}`).to.include(perpPos.side);",
-											"        }",
-											"    });",
-											"});",
-											"",
-											"// 5. Validate the entire response against a JSON schema",
-											"pm.test(\"Response matches the expected JSON schema for Megavault positions\", function () {",
-											"    const schema = {",
-											"        type: \"object\",",
-											"        required: [\"positions\"],",
-											"        properties: {",
-											"            positions: {",
-											"                type: \"array\",",
-											"                items: {",
-											"                    type: \"object\",",
-											"                    required: [\"ticker\", \"equity\"],",
-											"                    properties: {",
-											"                        ticker: { type: \"string\" },",
-											"                        equity: { type: \"string\" }, ",
-											"                        // assetPosition is optional",
-											"                        assetPosition: {",
-											"                            type: \"object\",",
-											"                            properties: {",
-											"                                size: { type: \"string\" },",
-											"                                symbol: { type: \"string\" },",
-											"                                side: { type: \"string\" }, // e.g. \"LONG\"",
-											"                                assetId: { type: \"string\" },",
-											"                                subaccountNumber: { type: \"number\" }",
-											"                            },",
-											"                            required: [\"size\", \"symbol\", \"side\", \"assetId\", \"subaccountNumber\"],",
-											"                            additionalProperties: true // if you want to allow extra fields",
-											"                        },",
-											"                        // perpetualPosition is optional",
-											"                        perpetualPosition: {",
-											"                            type: \"object\",",
-											"                            properties: {",
-											"                                market: { type: \"string\" },",
-											"                                status: { type: \"string\" },",
-											"                                side: { type: \"string\" },",
-											"                                size: { type: \"string\" },",
-											"                                maxSize: { type: \"string\" },",
-											"                                entryPrice: { type: \"string\" },",
-											"                                exitPrice: { type: [\"string\", \"null\"] },",
-											"                                realizedPnl: { type: \"string\" },",
-											"                                unrealizedPnl: { type: \"string\" },",
-											"                                createdAt: { type: \"string\", format: \"date-time\" },",
-											"                                createdAtHeight: { type: \"string\" },",
-											"                                closedAt: { type: [\"string\", \"null\"] },",
-											"                                sumOpen: { type: \"string\" },",
-											"                                sumClose: { type: \"string\" },",
-											"                                netFunding: { type: \"string\" },",
-											"                                subaccountNumber: { type: \"number\" }",
-											"                            },",
-											"                            required: [",
-											"                                \"market\",",
-											"                                \"status\",",
-											"                                \"side\",",
-											"                                \"size\",",
-											"                                \"maxSize\",",
-											"                                \"entryPrice\",",
-											"                                \"exitPrice\",",
-											"                                \"realizedPnl\",",
-											"                                \"unrealizedPnl\",",
-											"                                \"createdAt\",",
-											"                                \"createdAtHeight\",",
-											"                                \"closedAt\",",
-											"                                \"sumOpen\",",
-											"                                \"sumClose\",",
-											"                                \"netFunding\",",
-											"                                \"subaccountNumber\"",
-											"                            ],",
-											"                            additionalProperties: true",
-											"                        }",
-											"                    },",
-											"                    additionalProperties: true",
-											"                }",
-											"            }",
-											"        }",
-											"    };",
-											"",
-											"    pm.response.to.have.jsonSchema(schema);",
-											"});",
-											""
-										],
-										"type": "text/javascript",
-										"packages": {}
-									}
-								}
-							],
-							"request": {
-								"method": "GET",
-								"header": [],
-								"url": {
-									"raw": "{{indexerBaseUrl}}/vault/v1/megavault/positions",
-									"host": [
-										"{{indexerBaseUrl}}"
-									],
-									"path": [
-										"vault",
-										"v1",
-										"megavault",
-										"positions"
-									]
-								}
-							},
-							"response": []
 						}
 					]
+				}
+			]
+		},
+		{
+			"name": "Numia Postgrest",
+			"item": [
+				{
+					"name": "assets",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{numiaPostgrestBaseUrl}}/assets",
+							"host": [
+								"{{numiaPostgrestBaseUrl}}"
+							],
+							"path": [
+								"assets"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Tendermint Events",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{numiaPostgrestBaseUrl}}/tendermint_events?blockHeight=gt.43171573&select=*",
+							"host": [
+								"{{numiaPostgrestBaseUrl}}"
+							],
+							"path": [
+								"tendermint_events"
+							],
+							"query": [
+								{
+									"key": "blockHeight",
+									"value": "gt.43171573"
+								},
+								{
+									"key": "select",
+									"value": "*"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Transactions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{numiaPostgrestBaseUrl}}/transactions?select=*&id=eq.0a23a336-10fd-5433-997d-d30404d648ad",
+							"host": [
+								"{{numiaPostgrestBaseUrl}}"
+							],
+							"path": [
+								"transactions"
+							],
+							"query": [
+								{
+									"key": "blockHeight",
+									"value": "gt.43171573",
+									"disabled": true
+								},
+								{
+									"key": "select",
+									"value": "*"
+								},
+								{
+									"key": "id",
+									"value": "eq.0a23a336-10fd-5433-997d-d30404d648ad"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Schema",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{numiaPostgrestBaseUrl}}/",
+							"host": [
+								"{{numiaPostgrestBaseUrl}}"
+							],
+							"path": [
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"auth": {
+				"type": "jwt",
+				"jwt": [
+					{
+						"key": "payload",
+						"value": "{\"role\": \"numia\"}",
+						"type": "string"
+					},
+					{
+						"key": "secret",
+						"value": "{{numiaPostgrestJWTSecret}}",
+						"type": "string"
+					},
+					{
+						"key": "addTokenTo",
+						"value": "header",
+						"type": "string"
+					},
+					{
+						"key": "algorithm",
+						"value": "HS256",
+						"type": "string"
+					},
+					{
+						"key": "isSecretBase64Encoded",
+						"value": false,
+						"type": "boolean"
+					},
+					{
+						"key": "headerPrefix",
+						"value": "Bearer",
+						"type": "string"
+					},
+					{
+						"key": "queryParamKey",
+						"value": "token",
+						"type": "string"
+					},
+					{
+						"key": "header",
+						"value": "{}",
+						"type": "string"
+					}
+				]
+			},
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"exec": [
+							""
+						]
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"type": "text/javascript",
+						"packages": {},
+						"exec": [
+							""
+						]
+					}
 				}
 			]
 		}

@@ -58,7 +58,7 @@
 		},
 		{
 			"key": "ticker",
-			"value": "BTC-USD",
+			"value": "AKT-USD",
 			"type": "default",
 			"enabled": true
 		},
@@ -88,6 +88,6 @@
 		}
 	],
 	"_postman_variable_scope": "environment",
-	"_postman_exported_at": "2025-02-18T11:10:26.370Z",
-	"_postman_exported_using": "Postman/11.33.0"
+	"_postman_exported_at": "2025-05-21T10:04:42.359Z",
+	"_postman_exported_using": "Postman/11.46.3"
 }
