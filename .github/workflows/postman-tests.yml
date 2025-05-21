@@ -6,7 +6,7 @@ on:
 
 jobs:
   run-tests:
-    runs-on: self-hosted 
+    runs-on: self-hosted
     permissions:
       contents: write
     steps:
@@ -17,52 +17,46 @@ jobs:
 
       - name: Update Last Processed Upstream Run ID
         run: |
-          echo "Updating .last_upstream_run_id.txt with ${{ github.event.client_payload.run_id }}"
-          echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+          NEW_RUN_ID="${{ github.event.client_payload.run_id }}"
+          TARGET_FILE=".last_upstream_run_id.txt"
+
+          echo "$NEW_RUN_ID" > "$TARGET_FILE"
           
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          echo "Checking git status before stash:"
-          git status --short
-
-          echo "Stashing local changes..."
-          git stash push -u -m "workflow_stash_for_run_id_update" || echo "No changes to stash or stash failed."
+          git stash push -u -m "workflow_stash_for_run_id_update" || echo "No local changes to stash, or stash command failed."
           
-          echo "Pulling with rebase..."
           git pull --rebase
           
-          echo "Attempting to pop stash..."
           if git rev-parse -q --verify refs/stash >/dev/null; then
-            git stash pop || (
-              echo "Warning: 'git stash pop' failed. Re-applying .last_upstream_run_id.txt manually."
-              echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-              git add .last_upstream_run_id.txt 
-              git stash drop || echo "No stash to drop or already dropped."
-            )
-          else
-            echo "No stash found to pop. Ensuring .last_upstream_run_id.txt content."
-            echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-            git add .last_upstream_run_id.txt
+            if ! git stash pop; then
+              echo "Warning: 'git stash pop' failed. Will attempt to force update $TARGET_FILE and proceed."
+              echo "$NEW_RUN_ID" > "$TARGET_FILE" # Ensure our file content is prioritized
+              # Note: Other conflicts from the stash pop might remain.
+              # The script will try to `git add $TARGET_FILE` and commit.
+              # If other unmerged paths exist from the failed pop, the commit might fail.
+              # This simplified handling prioritizes the TARGET_FILE update.
+              git stash drop || echo "Warning: Failed to drop stash after a failed pop attempt."
+            fi
           fi
           
-          echo "Committing .last_upstream_run_id.txt..."
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID."
+          # Ensure the target file has the correct content and is staged.
+          # This covers successful pop, failed pop (where we overwrote), or no stash.
+          echo "$NEW_RUN_ID" > "$TARGET_FILE"
+          git add "$TARGET_FILE"
           
-          echo "Pushing changes..."
+          # Commit if there are changes. If $TARGET_FILE was unchanged and no other changes, this will do nothing.
+          git commit -m "[skip ci] Update last processed upstream run id to $NEW_RUN_ID" || echo "No changes to commit for last run ID, or commit failed."
+          
           git push
           
       - name: Run Newman Tests (Ultra-Simple Execution)
-        id: newman # ID for conclusion checking
+        id: newman
         run: |
-          # The only command in this block is newman.
-          # The script will exit with Newman's exit code.
           newman run postman/collection.json \
-            -e postman/environment.testnet.json 
-        # No NEWMAN_EXIT_CODE=$?
-        # No echo "exit_code=..." >> $GITHUB_OUTPUT
-        # No other echos after newman
-        continue-on-error: true # We need this so the Slack step can run and interpret the result
+            -e postman/environment.testnet.json
+        continue-on-error: true
 
       - name: Upload Test Results (JUnit XML)
         if: always()
@@ -77,82 +71,72 @@ jobs:
         uses: actions/upload-artifact@v4.6.0
         with:
           name: postman-html-report
-          path: newman-report.html
+          path: newman-report.html 
           if-no-files-found: warn
 
       - name: Notify Slack Channel and Handle Overall Job Failure
-        if: always() # This step will always run
-        env: # Define environment variables for this step
+        if: always()
+        env:
           NEWMAN_CONCLUSION: ${{ steps.newman.conclusion }}
-          JOB_SUCCESS_RAW: ${{ success() }} # This will be "True" or "False"
+          JOB_CONTEXT_STATUS: ${{ job.status }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          # Now use the environment variables directly in the script
-          echo "Newman Step Conclusion from ENV: $NEWMAN_CONCLUSION"
-          echo "Overall Job Success So Far (Raw from ENV): $JOB_SUCCESS_RAW"
-          
-          FINAL_MESSAGE=""
-          ICON=":test_tube:" 
-          COLOR="warning" 
           TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)"
-          MARK_JOB_AS_FAILED_FLAG=false # Our flag to exit 1
+          MARK_JOB_AS_FAILED_FLAG=false
+          ICON=":test_tube:"
+          COLOR="warning"
+          FINAL_MESSAGE=""
 
-          # Determine status based on Newman step
           if [ "$NEWMAN_CONCLUSION" == "success" ]; then
             FINAL_MESSAGE="All Newman tests passed successfully!"
             ICON=":white_check_mark:"
             COLOR="good"
-            if [ "$JOB_SUCCESS_RAW" == "False" ]; then
-              MARK_JOB_AS_FAILED_FLAG=true 
-            fi
           elif [ "$NEWMAN_CONCLUSION" == "failure" ]; then
-            FINAL_MESSAGE="Newman tests encountered failures (Newman command exited non-zero)."
+            FINAL_MESSAGE="Newman tests encountered failures."
             ICON=":warning:"
-            COLOR="danger" 
+            COLOR="danger"
             MARK_JOB_AS_FAILED_FLAG=true
           elif [ "$NEWMAN_CONCLUSION" == "skipped" ]; then
             FINAL_MESSAGE="Newman step was skipped."
             ICON=":zzz:"
             COLOR="neutral"
-            if [ "$JOB_SUCCESS_RAW" == "False" ]; then
-                MARK_JOB_AS_FAILED_FLAG=true
-            fi
-          else # cancelled, etc.
-            FINAL_MESSAGE="Newman step status: $NEWMAN_CONCLUSION. This might be due to job cancellation or an unknown issue."
+          else # cancelled, unknown status
+            FINAL_MESSAGE="Newman step status: $NEWMAN_CONCLUSION."
             ICON=":grey_question:"
             COLOR="neutral"
-            if [ "$JOB_SUCCESS_RAW" == "False" ] || [ "$NEWMAN_CONCLUSION" == "cancelled" ]; then
-                MARK_JOB_AS_FAILED_FLAG=true
-            fi
-          fi
-          
-          if [ "$JOB_SUCCESS_RAW" == "False" ] && [ "$MARK_JOB_AS_FAILED_FLAG" = false ]; then
-             FINAL_MESSAGE="A previous required step in the job failed. $FINAL_MESSAGE"
-             ICON=":x:" 
-             COLOR="danger"
-             MARK_JOB_AS_FAILED_FLAG=true
-          elif [ "$JOB_SUCCESS_RAW" == "False" ] && [ "$NEWMAN_CONCLUSION" != "failure" ]; then
-             FINAL_MESSAGE="A previous required step in the job failed. Current Newman status: $NEWMAN_CONCLUSION."
-             ICON=":x:" 
-             COLOR="danger"
-             MARK_JOB_AS_FAILED_FLAG=true
+            MARK_JOB_AS_FAILED_FLAG=true # Treat cancelled or unknown as a failure for the job
           fi
 
-          TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
-          PAYLOAD=$(jq -n \
-            --arg channel "indexer-api-testing" \
-            --arg username "GitHub Actions" \
-            --arg icon_emoji "$ICON" \
-            --arg color "$COLOR" \
-            --arg title "$TITLE_TEXT" \
-            --arg text "$TEXT_MESSAGE" \
-            '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
+          if [ "$JOB_CONTEXT_STATUS" == "failure" ]; then
+            PREFIX_FOR_PRIOR_FAILURE="A prior required step in the job failed. "
+            FINAL_MESSAGE="${PREFIX_FOR_PRIOR_FAILURE}${FINAL_MESSAGE}"
+            ICON=":x:" # Override icon to definite failure
+            COLOR="danger" # Override color to definite failure
+            MARK_JOB_AS_FAILED_FLAG=true # Ensure job is marked for failure
+          fi
           
-          echo "Payload for Slack: $PAYLOAD"
-          curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
+          TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
+          
+          # Check if SLACK_WEBHOOK_URL is set
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL is not set. Skipping Slack notification."
+          else
+            PAYLOAD=$(jq -n \
+              --arg channel "indexer-api-testing" \
+              --arg username "GitHub Actions" \
+              --arg icon_emoji "$ICON" \
+              --arg color "$COLOR" \
+              --arg title "$TITLE_TEXT" \
+              --arg text "$TEXT_MESSAGE" \
+              '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
+            
+            echo "Sending Slack notification..."
+            curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+          fi
 
           if [ "$MARK_JOB_AS_FAILED_FLAG" = true ]; then
             echo "Final determination: Marking job as FAILED based on step outcomes."
             exit 1
           else
-            echo "Final determination: Job considered SUCCESSFUL by this script."
+            echo "Final determination: Job considered SUCCESSFUL by this script's logic."
           fi
