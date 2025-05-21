@@ -52,21 +52,18 @@ jobs:
           echo "Pushing changes..."
           git push
           
-      - name: Run Newman Tests for Testnet (CLI Only - Minimal Script)
-        id: newman # Keep ID for consistency, though we won't set output here
+      - name: Run Newman Tests (Ultra-Simple Execution)
+        id: newman # ID for conclusion checking
         run: |
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI only, MINIMAL SCRIPT)..."
-          
+          # The only command in this block is newman.
+          # The script will exit with Newman's exit code.
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
-            --reporters cli 
-            # No file reporters (no --reporter-junit-export, no --reporter-htmlextra-export)
-          
-          # Directly after Newman, just echo and let the script end.
-          # We are temporarily removing the NEWMAN_EXIT_CODE capture and GITHUB_OUTPUT setting.
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command (CLI only) has finished executing in the script."
-          echo "Script block now ending."
-        continue-on-error: true # Keep for now so we can see if subsequent steps run
+            --reporters cli
+        # No NEWMAN_EXIT_CODE=$?
+        # No echo "exit_code=..." >> $GITHUB_OUTPUT
+        # No other echos after newman
+        continue-on-error: true # We need this so the Slack step can run and interpret the result
 
       - name: Upload Test Results (JUnit XML)
         if: always()
