@@ -52,19 +52,19 @@ jobs:
           echo "Pushing changes..."
           git push
           
-      - name: Run Newman Tests for Testnet (Diagnosing HTML reporter)
+      - name: Run Newman Tests for Testnet (Diagnosing Reporter Hang - CLI Only) # Changed name slightly for clarity
         id: newman
         run: |
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI and JUnit only)..."
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI only)..."
           
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
-            --reporters cli,junit \
-            --reporter-junit-export results.xml 
-          # HTML extra reporter line fully removed for this test
+            --reporters cli 
+          # JUnit reporter line fully removed for this test
+          # HTML extra reporter line was already removed
           
           NEWMAN_EXIT_CODE=$?
-          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command finished. Exit code: ${NEWMAN_EXIT_CODE}"
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command finished. Exit code from tests: ${NEWMAN_EXIT_CODE}"
           
           echo "Setting GitHub output variable 'exit_code'..."
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
