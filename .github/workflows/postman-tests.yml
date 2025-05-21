@@ -17,12 +17,50 @@ jobs:
 
       - name: Update Last Processed Upstream Run ID
         run: |
+          echo "Updating .last_upstream_run_id.txt with ${{ github.event.client_payload.run_id }}"
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          echo "Checking git status before stash:"
+          git status --short
+
+          # Stash any local changes (specifically the one we just made)
+          # The -u includes untracked files, which is good if .last_upstream_run_id.txt might be new
+          echo "Stashing local changes..."
+          git stash push -u -m "workflow_stash_for_run_id_update"
+          
+          echo "Pulling with rebase..."
+          # It's good practice to specify the remote and branch, though often not strictly necessary for default setup
+          # git pull --rebase origin ${{ github.ref_name }} # Or your main branch name
           git pull --rebase
+          
+          echo "Attempting to pop stash..."
+          # Check if a stash exists to pop. 'git stash pop' errors if the stash is empty.
+          if git rev-parse -q --verify refs/stash >/dev/null; then
+            # Pop the stash. If there are conflicts (e.g., remote also changed this file),
+            # this will attempt to merge. For a simple echo > file, conflicts are rare
+            # unless the file was significantly changed on remote.
+            # If pop fails due to conflict, the changes remain in the stash.
+            git stash pop || (
+              echo "Warning: 'git stash pop' failed, likely due to a conflict."
+              echo "The desired content for .last_upstream_run_id.txt is '${{ github.event.client_payload.run_id }}'."
+              echo "Forcing .last_upstream_run_id.txt to the desired content."
+              echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+              # Drop the stash if pop failed to avoid it lingering
+              git stash drop || echo "No stash to drop or already dropped."
+            )
+          else
+            echo "No stash found to pop. Ensuring .last_upstream_run_id.txt has correct content."
+            echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
+          fi
+          
+          echo "Adding and committing .last_upstream_run_id.txt..."
           git add .last_upstream_run_id.txt
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
+          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID (already up-to-date or no diff)."
+          
+          echo "Pushing changes..."
           git push
 
       - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
