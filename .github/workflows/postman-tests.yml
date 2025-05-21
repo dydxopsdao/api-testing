@@ -81,66 +81,69 @@ jobs:
           if-no-files-found: warn
 
       - name: Notify Slack Channel and Handle Overall Job Failure
-        if: always() # Ensure this step always runs to determine final job status
+        if: always() # This step will always run
         run: |
-          NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" 
-          # In the "Ultra-Simple Execution", steps.newman.outputs.exit_code will NOT be set.
-          # We rely solely on steps.newman.conclusion.
+          NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" # success, failure, skipped, cancelled
           
-          JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT="${{ success() }}" # True if all prior *required* steps passed.
-                                                              # With continue-on-error on Newman, this will be true if steps before Newman passed.
-
+          # Get the boolean success status from GitHub Actions context
+          # It will be the string "True" or "False"
+          OVERALL_JOB_SUCCESS_SO_FAR_RAW="${{ success() }}" 
+          
           FINAL_MESSAGE=""
           ICON=":test_tube:" 
           COLOR="warning" 
           TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)"
-          MARK_JOB_AS_FAILED=false # This will be our flag to exit 1
+          MARK_JOB_AS_FAILED_FLAG=false # Our flag to exit 1
 
           echo "Newman Step Conclusion: $NEWMAN_STEP_CONCLUSION"
-          echo "Job was successful up to this point (before this Slack step): $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT"
+          echo "Overall Job Success So Far (Raw from GitHub context): $OVERALL_JOB_SUCCESS_SO_FAR_RAW"
 
+          # Determine status based on Newman step
           if [ "$NEWMAN_STEP_CONCLUSION" == "success" ]; then
-            # This means Newman exited with 0 (all its tests passed)
             FINAL_MESSAGE="All Newman tests passed successfully!"
             ICON=":white_check_mark:"
             COLOR="good"
-            # MARK_JOB_AS_FAILED remains false
+            # MARK_JOB_AS_FAILED_FLAG remains false if OVERALL_JOB_SUCCESS_SO_FAR_RAW is "True"
+            if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ]; then
+              MARK_JOB_AS_FAILED_FLAG=true # A previous required step failed
+            fi
           elif [ "$NEWMAN_STEP_CONCLUSION" == "failure" ]; then
-            # This means Newman exited non-zero (test failures) OR the script in the Newman step had an error.
-            # For "Ultra-Simple Execution", it means Newman's tests failed.
             FINAL_MESSAGE="Newman tests encountered failures (Newman command exited non-zero)."
-            ICON=":warning:" # Or :x: for hard red
+            ICON=":warning:"
             COLOR="danger" 
-            MARK_JOB_AS_FAILED=true
+            MARK_JOB_AS_FAILED_FLAG=true # Newman failure means job fails
           elif [ "$NEWMAN_STEP_CONCLUSION" == "skipped" ]; then
-            FINAL_MESSAGE="Newman step was skipped (likely due to a failure in a previous required step)."
+            FINAL_MESSAGE="Newman step was skipped." # Usually due to a prior *required* step failing
             ICON=":zzz:"
             COLOR="neutral"
-            # If a previous *required* step failed, the job will already be marked as failure by GitHub.
-            # We set MARK_JOB_AS_FAILED to true to reflect this.
-            if ! $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT; then
-                MARK_JOB_AS_FAILED=true
+            # If a previous required step failed, OVERALL_JOB_SUCCESS_SO_FAR_RAW will be "False"
+            if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ]; then
+                MARK_JOB_AS_FAILED_FLAG=true
             fi
           else # cancelled, etc.
             FINAL_MESSAGE="Newman step status: $NEWMAN_STEP_CONCLUSION. This might be due to job cancellation or an unknown issue."
             ICON=":grey_question:"
             COLOR="neutral"
-            # If the job was already failing or was cancelled, reflect that.
-            if ! $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT || [ "$NEWMAN_STEP_CONCLUSION" == "cancelled" ]; then
-                MARK_JOB_AS_FAILED=true
+            # If the job was already failing/cancelled, mark it as failed.
+            if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ] || [ "$NEWMAN_STEP_CONCLUSION" == "cancelled" ]; then
+                MARK_JOB_AS_FAILED_FLAG=true
             fi
           fi
           
-          # If the job overall had a failure in a step *before* the Newman step (which has continue-on-error),
-          # ensure we still mark it as failed. The `success()` context function reflects this.
-          if ! $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT; then
-             # Only override message if not already a Newman step failure message
-             if [ "$NEWMAN_STEP_CONCLUSION" != "failure" ]; then 
-                FINAL_MESSAGE="A previous step in the job failed. $FINAL_MESSAGE"
-             fi
+          # Check if the job failed *before* the Newman step (if Newman didn't already cause a failure mark)
+          # The newman step has continue-on-error, so success() reflects steps *before* it mainly.
+          if [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ] && [ "$MARK_JOB_AS_FAILED_FLAG" = false ]; then
+             FINAL_MESSAGE="A previous required step in the job failed. $FINAL_MESSAGE"
              ICON=":x:" 
              COLOR="danger"
-             MARK_JOB_AS_FAILED=true
+             MARK_JOB_AS_FAILED_FLAG=true
+          elif [ "$OVERALL_JOB_SUCCESS_SO_FAR_RAW" == "False" ] && [ "$NEWMAN_STEP_CONCLUSION" != "failure" ]; then
+             # If a previous step failed, and Newman didn't explicitly fail but also didn't succeed (e.g. skipped)
+             # Ensure the message reflects the prior failure more prominently.
+             FINAL_MESSAGE="A previous required step in the job failed. Current Newman status: $NEWMAN_STEP_CONCLUSION."
+             ICON=":x:" 
+             COLOR="danger"
+             MARK_JOB_AS_FAILED_FLAG=true
           fi
 
           TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
@@ -156,7 +159,7 @@ jobs:
           echo "Payload for Slack: $PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-          if [ "$MARK_JOB_AS_FAILED" = true ]; then
+          if [ "$MARK_JOB_AS_FAILED_FLAG" = true ]; then
             echo "Final determination: Marking job as FAILED based on step outcomes."
             exit 1
           else
