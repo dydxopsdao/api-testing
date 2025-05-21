@@ -80,57 +80,67 @@ jobs:
           path: newman-report.html
           if-no-files-found: warn
 
-      - name: Notify Slack Channel and Handle Failure
-        if: always() # This ensures it runs
+            - name: Notify Slack Channel and Handle Overall Job Failure
+        if: always() # Ensure this step always runs to determine final job status
         run: |
-          # NEWMAN_EXIT_CODE comes from steps.newman.outputs.exit_code
-          # If the Newman step itself fails (like with a script error), 
-          # steps.newman.outputs.exit_code might not be set or might be empty.
-          # We should also check the step's own conclusion.
+          NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" 
+          # In the "Ultra-Simple Execution", steps.newman.outputs.exit_code will NOT be set.
+          # We rely solely on steps.newman.conclusion.
           
-          NEWMAN_STEP_CONCLUSION="${{ steps.newman.conclusion }}" # success, failure, skipped, etc.
-          NEWMAN_TEST_EXIT_CODE="${{ steps.newman.outputs.exit_code }}" # Newman's internal exit code
-
-          JOB_OVERALL_STATUS="${{ job.status }}" # Overall job status so far
+          JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT="${{ success() }}" # True if all prior *required* steps passed.
+                                                              # With continue-on-error on Newman, this will be true if steps before Newman passed.
 
           FINAL_MESSAGE=""
           ICON=":test_tube:" 
           COLOR="warning" 
           TITLE_TEXT="Newman Test Run (Testnet on Self-Hosted - No VPN)"
-          WILL_FAIL_JOB=false
+          MARK_JOB_AS_FAILED=false # This will be our flag to exit 1
 
-          if [ "$NEWMAN_STEP_CONCLUSION" == "failure" ]; then
-            FINAL_MESSAGE="Newman step failed to execute correctly (e.g., script error)."
-            ICON=":x:"
-            COLOR="danger"
-            WILL_FAIL_JOB=true
-          elif [ "$NEWMAN_STEP_CONCLUSION" == "success" ]; then
-            if [ -z "$NEWMAN_TEST_EXIT_CODE" ] || [ "$NEWMAN_TEST_EXIT_CODE" -eq 0 ]; then
-              FINAL_MESSAGE="All Newman tests passed successfully!"
-              ICON=":white_check_mark:"
-              COLOR="good"
-            else
-              FINAL_MESSAGE="Newman tests completed but encountered test failures (Newman Exit Code: $NEWMAN_TEST_EXIT_CODE)."
-              ICON=":warning:"
-              COLOR="danger" 
-              WILL_FAIL_JOB=true
-            fi
-          else # Skipped or cancelled
-            FINAL_MESSAGE="Newman step was $NEWMAN_STEP_CONCLUSION."
+          echo "Newman Step Conclusion: $NEWMAN_STEP_CONCLUSION"
+          echo "Job was successful up to this point (before this Slack step): $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT"
+
+          if [ "$NEWMAN_STEP_CONCLUSION" == "success" ]; then
+            # This means Newman exited with 0 (all its tests passed)
+            FINAL_MESSAGE="All Newman tests passed successfully!"
+            ICON=":white_check_mark:"
+            COLOR="good"
+            # MARK_JOB_AS_FAILED remains false
+          elif [ "$NEWMAN_STEP_CONCLUSION" == "failure" ]; then
+            # This means Newman exited non-zero (test failures) OR the script in the Newman step had an error.
+            # For "Ultra-Simple Execution", it means Newman's tests failed.
+            FINAL_MESSAGE="Newman tests encountered failures (Newman command exited non-zero)."
+            ICON=":warning:" # Or :x: for hard red
+            COLOR="danger" 
+            MARK_JOB_AS_FAILED=true
+          elif [ "$NEWMAN_STEP_CONCLUSION" == "skipped" ]; then
+            FINAL_MESSAGE="Newman step was skipped (likely due to a failure in a previous required step)."
             ICON=":zzz:"
             COLOR="neutral"
-            # If prior steps caused the job to fail, we still want the job to be red
-            if [ "$JOB_OVERALL_STATUS" == "failure" ]; then
-                WILL_FAIL_JOB=true
+            # If a previous *required* step failed, the job will already be marked as failure by GitHub.
+            # We set MARK_JOB_AS_FAILED to true to reflect this.
+            if ! $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT; then
+                MARK_JOB_AS_FAILED=true
+            fi
+          else # cancelled, etc.
+            FINAL_MESSAGE="Newman step status: $NEWMAN_STEP_CONCLUSION. This might be due to job cancellation or an unknown issue."
+            ICON=":grey_question:"
+            COLOR="neutral"
+            # If the job was already failing or was cancelled, reflect that.
+            if ! $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT || [ "$NEWMAN_STEP_CONCLUSION" == "cancelled" ]; then
+                MARK_JOB_AS_FAILED=true
             fi
           fi
           
-          # Append overall job status if it already failed before this notification step
-          if [ "$JOB_OVERALL_STATUS" == "failure" ] && [ "$NEWMAN_STEP_CONCLUSION" != "failure" ]; then
-             FINAL_MESSAGE="A previous step in the job failed. $FINAL_MESSAGE"
-             ICON=":x:"
+          # If the job overall had a failure in a step *before* the Newman step (which has continue-on-error),
+          # ensure we still mark it as failed. The `success()` context function reflects this.
+          if ! $JOB_WAS_SUCCESSFUL_UP_TO_THIS_POINT; then
+             # Only override message if not already a Newman step failure message
+             if [ "$NEWMAN_STEP_CONCLUSION" != "failure" ]; then 
+                FINAL_MESSAGE="A previous step in the job failed. $FINAL_MESSAGE"
+             fi
+             ICON=":x:" 
              COLOR="danger"
-             WILL_FAIL_JOB=true # Ensure job stays failed
+             MARK_JOB_AS_FAILED=true
           fi
 
           TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
@@ -143,12 +153,12 @@ jobs:
             --arg text "$TEXT_MESSAGE" \
             '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
           
-          echo "$PAYLOAD"
+          echo "Payload for Slack: $PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
-          if [ "$WILL_FAIL_JOB" = true ]; then
-            echo "Marking job as failed based on Newman step conclusion or test exit code."
+          if [ "$MARK_JOB_AS_FAILED" = true ]; then
+            echo "Final determination: Marking job as FAILED based on step outcomes."
             exit 1
           else
-            echo "Job successful."
+            echo "Final determination: Job considered SUCCESSFUL by this script."
           fi
