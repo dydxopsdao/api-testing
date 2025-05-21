@@ -55,16 +55,16 @@ jobs:
       - name: Run Newman Tests for Testnet
         id: newman
         run: |
-          # Ensure your postman/environment.testnet.json has the correct target URLs
-          # accessible from your self-hosted runner.
+          echo "$(date): Starting Newman run..."
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
-            --reporters cli,htmlextra,junit \
-            --reporter-htmlextra-export newman-report.html \
+            --reporters cli,junit \
             --reporter-junit-export results.xml
           NEWMAN_EXIT_CODE=$?
-          echo "Newman exit code: ${NEWMAN_EXIT_CODE}"
+          echo "$(date): Newman command finished. Exit code: ${NEWMAN_EXIT_CODE}"
+          echo "Setting GitHub output..."
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
+          echo "$(date): GitHub output set. Script finished."
         continue-on-error: true 
 
       - name: Upload Test Results (JUnit XML)
