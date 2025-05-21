@@ -55,17 +55,21 @@ jobs:
       - name: Run Newman Tests for Testnet
         id: newman
         run: |
-          echo "$(date): Starting Newman run..."
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Starting Newman test execution (CLI and JUnit only)..."
+          
           newman run postman/collection.json \
             -e postman/environment.testnet.json \
-            --reporters cli,junit \
-            --reporter-junit-export results.xml
+            --reporters cli,junit \ # <-- REMOVED htmlextra HERE
+            --reporter-junit-export results.xml 
+            # --reporter-htmlextra-export newman-report.html # <-- COMMENTED OUT or REMOVED
+          
           NEWMAN_EXIT_CODE=$?
-          echo "$(date): Newman command finished. Exit code: ${NEWMAN_EXIT_CODE}"
-          echo "Setting GitHub output..."
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] Newman command finished. Exit code: ${NEWMAN_EXIT_CODE}"
+          
+          echo "Setting GitHub output variable 'exit_code'..."
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
-          echo "$(date): GitHub output set. Script finished."
-        continue-on-error: true 
+          echo "[$(date +'%Y-%m-%d %H:%M:%S')] GitHub output set. Newman script block finished."
+        continue-on-error: true
 
       - name: Upload Test Results (JUnit XML)
         if: always()
