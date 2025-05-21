@@ -6,105 +6,101 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-22.04 # For NordLayer service stability
+    runs-on: ubuntu-22.04
     permissions:
-      contents: write # For git push
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
         with:
-          persist-credentials: true # Needed for git push
+          persist-credentials: true
+          lfs: true # Explicitly ensure LFS is handled, though it's default
 
       - name: Update Last Processed Upstream Run ID
+        # ... (this step using stash is likely fine now, focus on the .deb issue)
         run: |
           echo "Updating .last_upstream_run_id.txt with ${{ github.event.client_payload.run_id }}"
           echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          echo "Current git status before any operations:"
-          git status --short
-
-          # If LFS files are causing "unstaged changes" issues for rebase:
-          # Attempt to clean the working directory, resetting any unexpected changes to LFS files
-          # or other files, *except* for the one we just modified.
-          echo "Staging the intended change to .last_upstream_run_id.txt"
-          git add .last_upstream_run_id.txt
-
-          echo "Stashing all changes (including our staged one and any untracked files)..."
-          # This will stash our staged change and any other modifications/untracked files.
-          git stash push -u -m "workflow_stash_for_run_id_update"
-          
-          # After stashing, the working directory *should* be clean.
-          # If LFS files were the source of "unstaged changes" for rebase,
-          # and stashing them converted them to pointers correctly, this might be enough.
-          echo "Git status after stash (should be clean):"
-          git status --short
-
-          # Double-check LFS status - this might show if LFS files are still "dirty"
-          echo "Checking Git LFS status:"
-          git lfs status || echo "git lfs status command failed or LFS not in use."
-
-          # If 'git lfs status' still shows modifications, try to clean LFS files.
-          # This step assumes that any "modified" LFS files should actually be reset to their clean (pointer or full content) state from HEAD.
-          # Be cautious with 'git lfs checkout .' if you have other intentional LFS modifications you wanted to keep.
-          # For this specific workflow step, it's likely safe.
-          # git lfs fsck # Check for LFS inconsistencies
-          # git lfs checkout . # This attempts to fix LFS files to match the index
-
+          echo "Stashing local changes before pull..."
+          git stash push -u -m "workflow_stash_run_id" || echo "No changes to stash or stash failed."
           echo "Pulling with rebase..."
           git pull --rebase
-          
-          echo "Attempting to pop stash..."
+          echo "Popping stash..."
           if git rev-parse -q --verify refs/stash >/dev/null; then
             git stash pop || (
-              echo "Warning: 'git stash pop' failed. Re-applying .last_upstream_run_id.txt manually."
+              echo "Warning: Stash pop failed. Re-applying .last_upstream_run_id.txt manually."
               echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-              # It's important to re-add after manually changing if pop failed
               git add .last_upstream_run_id.txt 
-              git stash drop || echo "No stash to drop or already dropped."
+              git stash drop || echo "No stash to drop."
             )
           else
-            echo "No stash found to pop. Ensuring .last_upstream_run_id.txt content."
+            echo "No stash to pop. Ensuring .last_upstream_run_id.txt content."
             echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-            git add .last_upstream_run_id.txt # Re-add if created fresh
+            git add .last_upstream_run_id.txt
           fi
-          
-          echo "Committing .last_upstream_run_id.txt..."
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID."
-          
-          echo "Pushing changes..."
+          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit."
           git push
 
-      - name: Install Dependencies (Newman, NordLayer)
-        id: install_deps # ID for potential outputs (though not used currently)
+      - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
+        id: install_deps
         run: |
-          npm install -g newman newman-reporter-htmlextra
+          npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
           echo "System Info:"
           lsb_release -a
           uname -m
 
-          echo "Attempting to install NordLayer directly from ./nordlayer/nordlayer_3.3.5_amd64.deb..."
-          if [ -f "./nordlayer/nordlayer_3.3.5_amd64.deb" ]; then
-            # Remove any existing nordlayer packages to ensure a clean install from the .deb
-            sudo apt-get remove -y nordlayer nordlayer-latest nordlayer-tray || echo "No existing nordlayer packages to remove, or removal failed (which is ok)."
-            sudo dpkg -i ./nordlayer/nordlayer_3.3.5_amd64.deb
-            echo "Resolving dependencies for the directly installed NordLayer package..."
-            sudo apt-get update -y 
-            sudo apt-get install -f -y # This will install any missing dependencies
-          else
-            echo "ERROR: Application package ./nordlayer/nordlayer_3.3.5_amd64.deb not found!"
+          DEB_FILE_PATH="./nordlayer/nordlayer_3.3.5_amd64.deb"
+          echo "--- Diagnostics for $DEB_FILE_PATH ---"
+          if [ ! -f "$DEB_FILE_PATH" ]; then
+            echo "ERROR: $DEB_FILE_PATH not found after checkout!"
             exit 1
           fi
+          echo "File details:"
+          ls -lh "$DEB_FILE_PATH"
+          echo "File type output:"
+          file "$DEB_FILE_PATH"
+          
+          echo "Git LFS check for $DEB_FILE_PATH:"
+          # Check if the file content is an LFS pointer
+          if head -n 1 "$DEB_FILE_PATH" | grep -qE "^version https://git-lfs.github.com/spec/v1"; then
+            echo "The file $DEB_FILE_PATH appears to be an LFS pointer. This is likely the problem."
+            echo "Attempting 'git lfs pull' to fetch actual LFS content..."
+            # Ensure git-lfs is installed and initialized for the repo
+            # (actions/checkout usually handles this, but being explicit can help diagnose)
+            git lfs install --skip-repo # Ensures LFS commands are available
+            git lfs pull
+            echo "Re-checking file type after 'git lfs pull':"
+            ls -lh "$DEB_FILE_PATH"
+            file "$DEB_FILE_PATH"
+            # Verify it's no longer a pointer
+            if head -n 1 "$DEB_FILE_PATH" | grep -qE "^version https://git-lfs.github.com/spec/v1"; then
+                echo "ERROR: File is STILL an LFS pointer after 'git lfs pull'. LFS checkout failed."
+                exit 1
+            else
+                echo "File appears to be actual content after 'git lfs pull'."
+            fi
+          else
+            echo "File $DEB_FILE_PATH does not appear to be an LFS pointer based on its first line."
+          fi
+          echo "--- End Diagnostics ---"
 
+          echo "Attempting to install NordLayer directly from $DEB_FILE_PATH..."
+          # Remove any existing nordlayer packages to ensure a clean install from the .deb
+          sudo apt-get remove -y nordlayer nordlayer-latest nordlayer-tray || echo "No existing nordlayer packages to remove, or removal failed (which is ok)."
+          sudo dpkg -i "$DEB_FILE_PATH"
+          echo "Resolving dependencies for the directly installed NordLayer package..."
+          sudo apt-get update -y 
+          sudo apt-get install -f -y 
+          
+          # ... (Rest of the service start and stability check logic from previous correct version)
           echo "Reloading systemd daemon..."
           sudo systemctl daemon-reload
           echo "Attempting to stop NordLayer service (if running)..."
           sudo systemctl stop nordlayer.service || true
           echo "Resetting any failed state for nordlayer.service..."
           sudo systemctl reset-failed nordlayer.service || true 
-
           echo "Attempting to start NordLayer service..."
           if ! sudo systemctl start nordlayer.service; then
             echo "ERROR: Initial 'systemctl start nordlayer.service' command failed."
@@ -113,100 +109,74 @@ jobs:
             exit 1
           fi
           echo "Initial 'systemctl start nordlayer.service' command completed."
-
           echo "Checking NordLayer service stability (approx 15-20s)..."
           STABLE_SECONDS_REQUIRED=10 
           CHECK_INTERVAL=5
           MAX_TOTAL_WAIT_SECONDS=30
           ELAPSED_WAIT_SECONDS=0
           SERVICE_CONFIRMED_STABLE=false
-          sleep 2 # Give service a moment to settle after 'start' before first check
-
+          sleep 2
           while [ $ELAPSED_WAIT_SECONDS -lt $MAX_TOTAL_WAIT_SECONDS ]; do
             if ! systemctl is-active --quiet nordlayer.service; then
               echo "Service is NOT active. Failing stability check."
-              SERVICE_CONFIRMED_STABLE=false
-              break
+              SERVICE_CONFIRMED_STABLE=false; break
             fi
             CURRENT_NRESTARTS=$(systemctl show nordlayer.service --property=NRestarts --value)
             echo "Service active. Current NRestarts: $CURRENT_NRESTARTS"
-            
-            # After 'reset-failed' and 'start', NRestarts for a stable service should ideally be 0.
-            # We allow 1 to account for a potential single, quick, self-correcting restart.
             if [ "$CURRENT_NRESTARTS" -gt 1 ]; then 
-                 echo "Service has NRestarts=$CURRENT_NRESTARTS. This indicates instability after our start attempt."
-                 SERVICE_CONFIRMED_STABLE=false
-                 break 
+                 echo "Service has NRestarts=$CURRENT_NRESTARTS. Instability detected."
+                 SERVICE_CONFIRMED_STABLE=false; break 
             fi
-            
             if [ $ELAPSED_WAIT_SECONDS -ge $STABLE_SECONDS_REQUIRED ]; then
-                echo "Service has been active with NRestarts=$CURRENT_NRESTARTS for $ELAPSED_WAIT_SECONDS seconds."
-                SERVICE_CONFIRMED_STABLE=true
-                break
+                echo "Service stable for $ELAPSED_WAIT_SECONDS seconds with NRestarts=$CURRENT_NRESTARTS."
+                SERVICE_CONFIRMED_STABLE=true; break
             fi
-            
             sleep $CHECK_INTERVAL
             ELAPSED_WAIT_SECONDS=$((ELAPSED_WAIT_SECONDS + CHECK_INTERVAL))
           done
-          
           if [ "$SERVICE_CONFIRMED_STABLE" = false ]; then
             echo "ERROR: NordLayer service did not achieve stable active state."
             sudo systemctl status nordlayer.service --no-pager
             sudo journalctl -xeu nordlayer.service --no-pager -n 200 
-            echo "--- Checking config file /etc/nordlayer/config.hcl ---"
-            sudo ls -l /etc/nordlayer/config.hcl || echo "/etc/nordlayer/config.hcl not found."
-            if sudo test -f /etc/nordlayer/config.hcl; then sudo cat /etc/nordlayer/config.hcl || echo "Could not cat config file."; fi
-            echo "--- Checking for NordLayer's own logs in /var/log/ ---"
-            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found."
-            if sudo test -d /var/log/nordlayer; then sudo find /var/log/nordlayer/ -type f -exec echo "--- Contents of {} ---" \; -exec sudo cat {} \; ; fi
-            sudo grep -i 'nordlayer' /var/log/syslog || echo "No 'nordlayer' entries in syslog."
+            echo "--- Checking config /etc/nordlayer/config.hcl ---"
+            if sudo test -f /etc/nordlayer/config.hcl; then sudo cat /etc/nordlayer/config.hcl; else echo "Config not found."; fi
+            echo "--- Checking /var/log/nordlayer/ ---"
+            if sudo test -d /var/log/nordlayer; then sudo find /var/log/nordlayer/ -type f -exec echo "--- {} ---" \; -exec sudo cat {} \; ; else echo "Log dir not found."; fi
             exit 1
           fi
           echo "NordLayer service confirmed STABLE and ACTIVE."
-          
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
           echo "Checking for socket $SOCKET_PATH..."
           sleep 1 
           if sudo test -S "$SOCKET_PATH"; then
-            echo "SUCCESS: Socket $SOCKET_PATH found and is a socket."
-            echo "Setting permissions on existing socket $SOCKET_PATH to 666..."
+            echo "SUCCESS: Socket $SOCKET_PATH found."
             sudo chmod 666 "$SOCKET_PATH"
-            echo "Permissions on socket after chmod 666:"
             sudo ls -l "$SOCKET_PATH"
           else
-            echo "CRITICAL ERROR: Socket $SOCKET_PATH does NOT exist or is not a socket, even though service is STABLE."
-            sudo ls -la /run/nordlayer/ 
-            sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            echo "CRITICAL ERROR: Socket $SOCKET_PATH not found/not a socket despite stable service."
+            sudo ls -la /run/nordlayer/; sudo systemctl status nordlayer.service --no-pager; sudo journalctl -xeu nordlayer.service -n 100
             exit 1
           fi
-          
-          echo "End of Install Dependencies step. Pausing for 2s before login attempt..."
+          echo "End of Install Dependencies step. Pausing for 2s..."
           sleep 2
 
+      # ... (Login to NordLayer VPN step and all subsequent steps remain the same as the last complete version)
       - name: Login to NordLayer VPN
         run: |
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
           echo "Login Step: Current user: $(whoami), Groups: $(groups)"
           echo "Login Step: Verifying socket $SOCKET_PATH existence..."
-          
-          if ! sudo test -S "$SOCKET_PATH"; then # Use sudo test -S for accuracy
+          if ! sudo test -S "$SOCKET_PATH"; then
             echo "CRITICAL ERROR (Login Step): Socket $SOCKET_PATH is MISSING or not a socket!"
-            sudo ls -la /run/nordlayer/
-            sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 100
+            sudo ls -la /run/nordlayer/; sudo systemctl status nordlayer.service --no-pager; sudo journalctl -xeu nordlayer.service -n 100
             exit 1
           else
-            echo "Login Step: Socket $SOCKET_PATH FOUND. Permissions:"
-            sudo ls -l "$SOCKET_PATH"
+            echo "Login Step: Socket $SOCKET_PATH FOUND. Permissions:"; sudo ls -l "$SOCKET_PATH"
           fi
-
           if ! nordlayer login --email "${{ secrets.NORDLAYER_EMAIL }}" --password "${{ secrets.NORDLAYER_PASSWORD }}" --organization "dydxopsdao"; then
             echo "ERROR: nordlayer login command failed."
             sudo journalctl -xeu nordlayer.service --no-pager -n 100 
-            echo "--- Checking for /var/log/nordlayer/ AT LOGIN FAILURE ---"
-            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
-            if sudo test -d /var/log/nordlayer; then sudo find /var/log/nordlayer/ -type f -exec echo "--- Contents of {} ---" \; -exec sudo cat {} \; ; fi
+            if sudo test -d /var/log/nordlayer; then echo "--- /var/log/nordlayer/ ---"; sudo find /var/log/nordlayer/ -type f -exec echo "--- {} ---" \; -exec sudo cat {} \; ; fi
             exit 1
           fi
           echo "NordLayer login successful."
