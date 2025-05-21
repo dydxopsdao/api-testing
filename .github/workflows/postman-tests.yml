@@ -6,14 +6,14 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # For NordLayer service stability
     permissions:
-      contents: write
+      contents: write # For git push
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4.2.2
         with:
-          persist-credentials: true
+          persist-credentials: true # Needed for git push
 
       - name: Update Last Processed Upstream Run ID
         run: |
@@ -26,140 +26,121 @@ jobs:
           echo "Checking git status before stash:"
           git status --short
 
-          # Stash any local changes (specifically the one we just made)
-          # The -u includes untracked files, which is good if .last_upstream_run_id.txt might be new
           echo "Stashing local changes..."
-          git stash push -u -m "workflow_stash_for_run_id_update"
+          git stash push -u -m "workflow_stash_for_run_id_update" || echo "No changes to stash or stash failed."
           
           echo "Pulling with rebase..."
-          # It's good practice to specify the remote and branch, though often not strictly necessary for default setup
-          # git pull --rebase origin ${{ github.ref_name }} # Or your main branch name
           git pull --rebase
           
           echo "Attempting to pop stash..."
-          # Check if a stash exists to pop. 'git stash pop' errors if the stash is empty.
           if git rev-parse -q --verify refs/stash >/dev/null; then
-            # Pop the stash. If there are conflicts (e.g., remote also changed this file),
-            # this will attempt to merge. For a simple echo > file, conflicts are rare
-            # unless the file was significantly changed on remote.
-            # If pop fails due to conflict, the changes remain in the stash.
             git stash pop || (
-              echo "Warning: 'git stash pop' failed, likely due to a conflict."
-              echo "The desired content for .last_upstream_run_id.txt is '${{ github.event.client_payload.run_id }}'."
-              echo "Forcing .last_upstream_run_id.txt to the desired content."
+              echo "Warning: 'git stash pop' failed. Re-applying .last_upstream_run_id.txt manually."
               echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
-              # Drop the stash if pop failed to avoid it lingering
               git stash drop || echo "No stash to drop or already dropped."
             )
           else
-            echo "No stash found to pop. Ensuring .last_upstream_run_id.txt has correct content."
+            echo "No stash found to pop. Ensuring .last_upstream_run_id.txt content."
             echo "${{ github.event.client_payload.run_id }}" > .last_upstream_run_id.txt
           fi
           
           echo "Adding and committing .last_upstream_run_id.txt..."
           git add .last_upstream_run_id.txt
-          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID (already up-to-date or no diff)."
+          git commit -m "[skip ci] Update last processed upstream run id to ${{ github.event.client_payload.run_id }}" || echo "No changes to commit for last run ID."
           
           echo "Pushing changes..."
           git push
 
-      - name: Install Dependencies (Newman, NordLayer, Datadog CLI)
-        id: install_deps
+      - name: Install Dependencies (Newman, NordLayer)
+        id: install_deps # ID for potential outputs (though not used currently)
         run: |
-          npm install -g newman newman-reporter-htmlextra @datadog/datadog-ci
+          npm install -g newman newman-reporter-htmlextra
           echo "System Info:"
           lsb_release -a
           uname -m
-          echo "Setting up NordLayer repository using local ./nordlayer/nordlayer-latest_1.0.0_all.deb..."
-          if [ -f "./nordlayer/nordlayer-latest_1.0.0_all.deb" ]; then
-            sudo dpkg -i ./nordlayer/nordlayer-latest_1.0.0_all.deb
+
+          echo "Attempting to install NordLayer directly from ./nordlayer/nordlayer_3.3.5_amd64.deb..."
+          if [ -f "./nordlayer/nordlayer_3.3.5_amd64.deb" ]; then
+            # Remove any existing nordlayer packages to ensure a clean install from the .deb
+            sudo apt-get remove -y nordlayer nordlayer-latest nordlayer-tray || echo "No existing nordlayer packages to remove, or removal failed (which is ok)."
+            sudo dpkg -i ./nordlayer/nordlayer_3.3.5_amd64.deb
+            echo "Resolving dependencies for the directly installed NordLayer package..."
+            sudo apt-get update -y 
+            sudo apt-get install -f -y # This will install any missing dependencies
           else
-            echo "ERROR: Local repository setup file ./nordlayer/nordlayer-latest_1.0.0_all.deb not found!"
+            echo "ERROR: Application package ./nordlayer/nordlayer_3.3.5_amd64.deb not found!"
             exit 1
           fi
-          sudo apt-get update -y
-          sudo apt-get install -f -y
-          echo "Installing NordLayer package..."
-          sudo apt-get install -y nordlayer 
 
           echo "Reloading systemd daemon..."
           sudo systemctl daemon-reload
           echo "Attempting to stop NordLayer service (if running)..."
           sudo systemctl stop nordlayer.service || true
-
-          echo "Attempting to restart NordLayer service..."
-          # Using 'restart' as it might handle some flaky services differently.
-          # Also, explicitly reset failed state before restart attempt for cleaner state.
+          echo "Resetting any failed state for nordlayer.service..."
           sudo systemctl reset-failed nordlayer.service || true 
-          if ! sudo systemctl restart nordlayer.service; then
-            echo "ERROR: 'systemctl restart nordlayer.service' command failed."
+
+          echo "Attempting to start NordLayer service..."
+          if ! sudo systemctl start nordlayer.service; then
+            echo "ERROR: Initial 'systemctl start nordlayer.service' command failed."
             sudo systemctl status nordlayer.service --no-pager
             sudo journalctl -xeu nordlayer.service --no-pager -n 100
-            echo "--- Checking for /var/log/nordlayer/ ---"
-            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
-            sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
             exit 1
           fi
-          echo "Command 'systemctl restart nordlayer.service' completed."
+          echo "Initial 'systemctl start nordlayer.service' command completed."
 
-          # Simplified stability check using NRestarts
-          echo "Checking NordLayer service stability (approx 20s)..."
-          MAX_RESTART_CHECKS=4
-          CHECKS_DONE=0
-          SERVICE_STABLE_ENOUGH=false
-          # Get initial restart count *after* our explicit restart
-          # It's possible systemd's NRestarts counter is cumulative across reboots/etc.
-          # For this check, we are interested if it increments *after* our explicit restart.
-          # However, a simpler check is just ensuring it's not excessively high.
-          
-          # Allow a few seconds for the service to settle after restart command
-          sleep 5 
+          echo "Checking NordLayer service stability (approx 15-20s)..."
+          STABLE_SECONDS_REQUIRED=10 
+          CHECK_INTERVAL=5
+          MAX_TOTAL_WAIT_SECONDS=30
+          ELAPSED_WAIT_SECONDS=0
+          SERVICE_CONFIRMED_STABLE=false
+          sleep 2 # Give service a moment to settle after 'start' before first check
 
-          while [ $CHECKS_DONE -lt $MAX_RESTART_CHECKS ]; do
+          while [ $ELAPSED_WAIT_SECONDS -lt $MAX_TOTAL_WAIT_SECONDS ]; do
             if ! systemctl is-active --quiet nordlayer.service; then
-              echo "NordLayer service is NOT active (Check $((CHECKS_DONE+1))/$MAX_RESTART_CHECKS)."
-              SERVICE_STABLE_ENOUGH=false
-              break 
+              echo "Service is NOT active. Failing stability check."
+              SERVICE_CONFIRMED_STABLE=false
+              break
             fi
-
-            RESTART_COUNT=$(systemctl show nordlayer.service --property=NRestarts --value)
-            echo "Service active. NRestarts: $RESTART_COUNT (Check $((CHECKS_DONE+1))/$MAX_RESTART_CHECKS)."
+            CURRENT_NRESTARTS=$(systemctl show nordlayer.service --property=NRestarts --value)
+            echo "Service active. Current NRestarts: $CURRENT_NRESTARTS"
             
-            # If NRestarts is low, assume stable for this check.
-            # The definition of "low" can be tricky. After an explicit 'restart', NRestarts should ideally be 0.
-            # If it's already > 0, it might have failed during the restart command itself.
-            # If it increments during our loop, that's bad.
-            # Let's consider it stable if it's active and NRestarts is not excessively high (e.g. <= 2).
-            if [ "$RESTART_COUNT" -le 2 ]; then
-                SERVICE_STABLE_ENOUGH=true
-                # If it's stable for one check iteration, we can break early, or continue for more confidence.
-                # For now, let's break if it looks good.
-                break 
-            else
-                echo "Warning: Service has NRestarts=$RESTART_COUNT. This might indicate instability."
-                SERVICE_STABLE_ENOUGH=false 
-                break 
+            # After 'reset-failed' and 'start', NRestarts for a stable service should ideally be 0.
+            # We allow 1 to account for a potential single, quick, self-correcting restart.
+            if [ "$CURRENT_NRESTARTS" -gt 1 ]; then 
+                 echo "Service has NRestarts=$CURRENT_NRESTARTS. This indicates instability after our start attempt."
+                 SERVICE_CONFIRMED_STABLE=false
+                 break 
             fi
-            sleep 5 # Wait before next check if we didn't break
-            CHECKS_DONE=$((CHECKS_DONE+1))
+            
+            if [ $ELAPSED_WAIT_SECONDS -ge $STABLE_SECONDS_REQUIRED ]; then
+                echo "Service has been active with NRestarts=$CURRENT_NRESTARTS for $ELAPSED_WAIT_SECONDS seconds."
+                SERVICE_CONFIRMED_STABLE=true
+                break
+            fi
+            
+            sleep $CHECK_INTERVAL
+            ELAPSED_WAIT_SECONDS=$((ELAPSED_WAIT_SECONDS + CHECK_INTERVAL))
           done
-
-
-          if [ "$SERVICE_STABLE_ENOUGH" = false ]; then
-            echo "ERROR: NordLayer service is not stable or not active after checks."
+          
+          if [ "$SERVICE_CONFIRMED_STABLE" = false ]; then
+            echo "ERROR: NordLayer service did not achieve stable active state."
             sudo systemctl status nordlayer.service --no-pager
-            sudo journalctl -xeu nordlayer.service --no-pager -n 200
-            echo "--- Checking for /var/log/nordlayer/ ---"
-            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
-            sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
+            sudo journalctl -xeu nordlayer.service --no-pager -n 200 
+            echo "--- Checking config file /etc/nordlayer/config.hcl ---"
+            sudo ls -l /etc/nordlayer/config.hcl || echo "/etc/nordlayer/config.hcl not found."
+            if sudo test -f /etc/nordlayer/config.hcl; then sudo cat /etc/nordlayer/config.hcl || echo "Could not cat config file."; fi
+            echo "--- Checking for NordLayer's own logs in /var/log/ ---"
+            sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found."
+            if sudo test -d /var/log/nordlayer; then sudo find /var/log/nordlayer/ -type f -exec echo "--- Contents of {} ---" \; -exec sudo cat {} \; ; fi
+            sudo grep -i 'nordlayer' /var/log/syslog || echo "No 'nordlayer' entries in syslog."
             exit 1
           fi
-          echo "NordLayer service appears STABLE and ACTIVE."
+          echo "NordLayer service confirmed STABLE and ACTIVE."
           
           SOCKET_PATH="/run/nordlayer/nordlayer.sock"
           echo "Checking for socket $SOCKET_PATH..."
           sleep 1 
-
           if sudo test -S "$SOCKET_PATH"; then
             echo "SUCCESS: Socket $SOCKET_PATH found and is a socket."
             echo "Setting permissions on existing socket $SOCKET_PATH to 666..."
@@ -183,7 +164,7 @@ jobs:
           echo "Login Step: Current user: $(whoami), Groups: $(groups)"
           echo "Login Step: Verifying socket $SOCKET_PATH existence..."
           
-          if ! sudo test -S "$SOCKET_PATH"; then
+          if ! sudo test -S "$SOCKET_PATH"; then # Use sudo test -S for accuracy
             echo "CRITICAL ERROR (Login Step): Socket $SOCKET_PATH is MISSING or not a socket!"
             sudo ls -la /run/nordlayer/
             sudo systemctl status nordlayer.service --no-pager
@@ -199,12 +180,11 @@ jobs:
             sudo journalctl -xeu nordlayer.service --no-pager -n 100 
             echo "--- Checking for /var/log/nordlayer/ AT LOGIN FAILURE ---"
             sudo ls -la /var/log/nordlayer/ || echo "/var/log/nordlayer/ not found or no permission."
-            sudo find /var/log/ -name "*nordlayer*" -ls 2>/dev/null || echo "No specific nordlayer logs found in /var/log."
+            if sudo test -d /var/log/nordlayer; then sudo find /var/log/nordlayer/ -type f -exec echo "--- Contents of {} ---" \; -exec sudo cat {} \; ; fi
             exit 1
           fi
           echo "NordLayer login successful."
 
-      # ... (Rest of the workflow: Connect, Newman, Disconnect, Uploads, Slack) ...
       - name: Connect to NordLayer VPN
         run: |
           nordlayer gateways
@@ -222,14 +202,16 @@ jobs:
             --reporter-htmlextra-export newman-report.html \
             --reporter-junit-export results.xml
           NEWMAN_EXIT_CODE=$?
+          echo "Newman exit code: ${NEWMAN_EXIT_CODE}"
           echo "exit_code=${NEWMAN_EXIT_CODE}" >> $GITHUB_OUTPUT
         continue-on-error: true
 
       - name: Disconnect from NordLayer VPN
         if: always()
         run: |
+          echo "Attempting to disconnect from NordLayer VPN..."
           nordlayer status || true
-          nordlayer disconnect || echo "Already disconnected or failed to disconnect."
+          nordlayer disconnect || echo "NordLayer already disconnected or failed to disconnect."
 
       - name: Upload Test Results (JUnit XML)
         if: always()
@@ -286,8 +268,13 @@ jobs:
           echo "$PAYLOAD"
           curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "${{ secrets.SLACK_WEBHOOK_URL }}"
 
+          # Final check to mark job as failed if necessary
           if [ "$JOB_STATUS" == "failure" ]; then
+            echo "Job failed at a previous step."
             exit 1
           elif [ -n "$NEWMAN_EXIT_CODE" ] && [ "$NEWMAN_EXIT_CODE" -ne 0 ]; then
+            echo "Newman tests failed. Marking job as failed."
             exit 1
+          else
+            echo "Job and tests (if applicable) successful."
           fi
