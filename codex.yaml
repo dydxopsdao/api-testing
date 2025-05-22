@@ -1,0 +1,5 @@
+setup: |
+  npm install
+  npm install -g newman newman-reporter-htmlextra
+
+test: npm test
