@@ -56,4 +56,5 @@ newman run postman/collection.json \
   -e postman/environment.json \
   --reporters cli,junit \
   --reporter-junit-export results.xml
+```
 You’ll see test output in your terminal, and a results.xml file for JUnit-format logs.
