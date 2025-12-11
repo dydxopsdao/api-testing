@@ -58,7 +58,7 @@
 		},
 		{
 			"key": "ticker",
-			"value": "MEW-USD",
+			"value": "BTC-USD",
 			"type": "default",
 			"enabled": true
 		},
