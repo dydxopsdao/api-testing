@@ -4,7 +4,7 @@
 	"values": [
 		{
 			"key": "indexerBaseUrl",
-			"value": "https://indexer.v4testnet.dydx.exchange/v4/",
+			"value": "https://indexer.v4testnet.dydx.exchange/v4",
 			"type": "default",
 			"enabled": true
 		},
@@ -85,9 +85,22 @@
 			"value": "1",
 			"type": "default",
 			"enabled": true
+		},
+		{
+			"key": "affiliateAddressFromCode",
+			"value": "",
+			"type": "any",
+			"enabled": true
+		},
+		{
+			"key": "WSBaseUrl",
+			"value": "",
+			"type": "default",
+			"enabled": true
 		}
 	],
+	"color": null,
 	"_postman_variable_scope": "environment",
-	"_postman_exported_at": "2025-05-21T10:07:19.947Z",
-	"_postman_exported_using": "Postman/11.46.3"
+	"_postman_exported_at": "2025-12-11T12:50:46.505Z",
+	"_postman_exported_using": "Postman/11.75.5"
 }

@@ -55,8 +55,10 @@ jobs:
         id: newman
         run: |
           newman run postman/collection.json \
-            -e postman/environment.testnet.json
-        continue-on-error: true
+            -e postman/environment.testnet.json \
+            -r cli,junit,html \
+            --reporter-junit-export results.xml \
+            --reporter-html-export newman-report.html
 
       - name: Upload Test Results (JUnit XML)
         if: always()
