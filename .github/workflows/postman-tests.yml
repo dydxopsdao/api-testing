@@ -32,15 +32,19 @@ jobs:
           echo "Triggered by upstream run id: $NEW_RUN_ID"
 
       - name: Install Newman and HTML reporter
-        # Install explicitly so the run doesn't depend on whatever happens to be
-        # pre-baked on the self-hosted runner (the html reporter had drifted off it,
-        # which is what broke the run). htmlextra matches package.json and the README.
-        run: npm install -g newman newman-reporter-htmlextra
+        # Install locally (NOT -g): the runner's global newman is root-owned, so
+        # `npm install -g` hits EACCES. A project-local install needs no sudo and
+        # makes the run reproducible regardless of runner drift. htmlextra matches
+        # package.json and the README.
+        run: npm install newman newman-reporter-htmlextra
 
       - name: Run Newman Tests (Ultra-Simple Execution)
         id: newman
+        # Use npx so we run the locally-installed newman, which can resolve the
+        # local htmlextra reporter (a bare `newman` would pick up the global one
+        # that's missing the reporter).
         run: |
-          newman run postman/collection.json \
+          npx newman run postman/collection.json \
             -e postman/environment.testnet.json \
             -r cli,junit,htmlextra \
             --reporter-junit-export results.xml \
