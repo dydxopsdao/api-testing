@@ -4,53 +4,33 @@ on:
   repository_dispatch:
     types: [run-tests]
 
+# Read-only: this workflow no longer writes the state file (the check workflow owns
+# it now), so the self-hosted runner needs no write access to the repo.
+permissions:
+  contents: read
+
+# Don't let two dispatched runs hammer the single self-hosted runner at once.
+concurrency:
+  group: newman-testnet
+  cancel-in-progress: false
+
 jobs:
   run-tests:
     runs-on: self-hosted
-    permissions:
-      contents: write
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          persist-credentials: true
+          persist-credentials: false
 
-      - name: Update Last Processed Upstream Run ID
+      - name: Log triggering upstream run id
+        # Via env so the dispatch payload is never interpolated into the shell as text.
+        env:
+          NEW_RUN_ID: ${{ github.event.client_payload.run_id }}
         run: |
-          NEW_RUN_ID="${{ github.event.client_payload.run_id }}"
-          TARGET_FILE=".last_upstream_run_id.txt"
+          echo "Triggered by upstream run id: $NEW_RUN_ID"
 
-          echo "$NEW_RUN_ID" > "$TARGET_FILE"
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          git stash push -u -m "workflow_stash_for_run_id_update" || echo "No local changes to stash, or stash command failed."
-          
-          git pull --rebase
-          
-          if git rev-parse -q --verify refs/stash >/dev/null; then
-            if ! git stash pop; then
-              echo "Warning: 'git stash pop' failed. Will attempt to force update $TARGET_FILE and proceed."
-              echo "$NEW_RUN_ID" > "$TARGET_FILE" # Ensure our file content is prioritized
-              # Note: Other conflicts from the stash pop might remain.
-              # The script will try to `git add $TARGET_FILE` and commit.
-              # If other unmerged paths exist from the failed pop, the commit might fail.
-              # This simplified handling prioritizes the TARGET_FILE update.
-              git stash drop || echo "Warning: Failed to drop stash after a failed pop attempt."
-            fi
-          fi
-          
-          # Ensure the target file has the correct content and is staged.
-          # This covers successful pop, failed pop (where we overwrote), or no stash.
-          echo "$NEW_RUN_ID" > "$TARGET_FILE"
-          git add "$TARGET_FILE"
-          
-          # Commit if there are changes. If $TARGET_FILE was unchanged and no other changes, this will do nothing.
-          git commit -m "[skip ci] Update last processed upstream run id to $NEW_RUN_ID" || echo "No changes to commit for last run ID, or commit failed."
-          
-          git push
-          
       - name: Run Newman Tests (Ultra-Simple Execution)
         id: newman
         run: |
@@ -62,7 +42,7 @@ jobs:
 
       - name: Upload Test Results (JUnit XML)
         if: always()
-        uses: actions/upload-artifact@v4.6.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: postman-test-results
           path: results.xml
@@ -70,10 +50,10 @@ jobs:
 
       - name: Upload HTML Report (Nice UI)
         if: always()
-        uses: actions/upload-artifact@v4.6.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: postman-html-report
-          path: newman-report.html 
+          path: newman-report.html
           if-no-files-found: warn
 
       - name: Notify Slack Channel and Handle Overall Job Failure
@@ -116,9 +96,9 @@ jobs:
             COLOR="danger" # Override color to definite failure
             MARK_JOB_AS_FAILED_FLAG=true # Ensure job is marked for failure
           fi
-          
+
           TEXT_MESSAGE="$FINAL_MESSAGE Workflow: <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|${{ github.workflow }} Run #${{ github.run_number }}>"
-          
+
           # Check if SLACK_WEBHOOK_URL is set
           if [ -z "$SLACK_WEBHOOK_URL" ]; then
             echo "SLACK_WEBHOOK_URL is not set. Skipping Slack notification."
@@ -131,7 +111,7 @@ jobs:
               --arg title "$TITLE_TEXT" \
               --arg text "$TEXT_MESSAGE" \
               '{channel: $channel, username: $username, icon_emoji: $icon_emoji, attachments: [{color: $color, title: $title, text: $text}]}')
-            
+
             echo "Sending Slack notification..."
             curl -X POST -H "Content-type: application/json" --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
           fi

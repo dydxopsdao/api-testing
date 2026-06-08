@@ -8,78 +8,134 @@ on:
         required: false
         default: "false"
   schedule:
-    - cron: "*/60 * * * *"
+    # Hourly. (The previous "*/60 * * * *" was misleading — the minute field maxes
+    # at 59, so it also resolved to :00. "0 * * * *" states the intent plainly.)
+    - cron: "0 * * * *"
+
+# Default to read-only; the one job that records state opts up to write below.
+permissions:
+  contents: read
+
+# Serialize check runs so the state-file commit/push can never race itself.
+concurrency:
+  group: testnet-indexer-check
+  cancel-in-progress: false
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # needed to commit + push the processed-run-id state file
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          persist-credentials: true
-
-      - name: Get Last Processed Upstream Run ID
-        id: last-run
-        run: |
-          if [ -f .last_upstream_run_id.txt ]; then
-            cat .last_upstream_run_id.txt
-          else
-            echo "none"
-          fi > last_run_id.txt
-          LAST_RUN=$(cat last_run_id.txt)
-          echo "Last processed upstream run id: $LAST_RUN"
-          echo "LAST_RUN_ID=$LAST_RUN" >> $GITHUB_ENV
+          persist-credentials: true # needed to push the state update below
 
       - name: Get Latest Upstream Run ID
         id: get-run
-        uses: actions/github-script@v6
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
             const owner = "dydxprotocol";
             const repo = "v4-chain";
-            const workflowFile = "indexer-build-and-push-testnet.yml"; // adjust if needed
-            const { data: runs } = await github.rest.actions.listWorkflowRuns({
-              owner,
-              repo,
-              workflow_id: workflowFile,
-              status: "completed",
-              per_page: 1
-            });
-            if (runs.total_count > 0) {
-              const latestRun = runs.workflow_runs[0];
-              core.setOutput("run_id", latestRun.id.toString());
-              console.log("Latest upstream run id: " + latestRun.id.toString());
+            const workflowFile = "indexer-build-and-push-testnet.yml";
+            // A real testnet image push happens on a push to a deploy branch or on a
+            // release, and must have succeeded. pull_request runs are validation only,
+            // and failed/cancelled runs are not deployments — exclude both.
+            let latest = null;
+            for (const event of ["push", "release"]) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: workflowFile,
+                event,
+                status: "success",
+                per_page: 1,
+              });
+              if (data.total_count > 0) {
+                const run = data.workflow_runs[0];
+                if (!latest || new Date(run.created_at) > new Date(latest.created_at)) {
+                  latest = run;
+                }
+              }
+            }
+            if (latest) {
+              core.setOutput("run_id", latest.id.toString());
+              console.log(
+                `Latest testnet deploy run: ${latest.id} (${latest.event}, ${latest.head_branch}, ${latest.created_at})`
+              );
             } else {
               core.setOutput("run_id", "none");
-              console.log("No upstream workflow run found.");
+              console.log("No successful testnet deploy run found.");
             }
 
       - name: Determine if tests should run
         id: determine
+        # Pass event/step values through env so they are never interpolated into the
+        # shell as raw text (script-injection hardening).
+        env:
+          NEW_RUN_ID: ${{ steps.get-run.outputs.run_id }}
+          OVERRIDE: ${{ github.event.inputs.override-commit-check }}
         run: |
-          LAST_RUN_ID="${LAST_RUN_ID:-none}"
-          NEW_RUN_ID="${{ steps.get-run.outputs.run_id }}"
+          LAST_RUN_ID="none"
+          [ -f .last_upstream_run_id.txt ] && LAST_RUN_ID="$(cat .last_upstream_run_id.txt)"
           echo "Last processed upstream run id: $LAST_RUN_ID"
           echo "Latest upstream run id: $NEW_RUN_ID"
-          OVERRIDE="${{ github.event.inputs.override-commit-check }}"
           if [ "$OVERRIDE" = "true" ]; then
             echo "Override provided, will run tests."
-            echo "run_tests=true" >> $GITHUB_OUTPUT
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
+          elif [ "$NEW_RUN_ID" = "none" ]; then
+            echo "No upstream run id available. Skipping tests."
+            echo "run_tests=false" >> "$GITHUB_OUTPUT"
+          elif [ "$LAST_RUN_ID" = "$NEW_RUN_ID" ]; then
+            echo "Upstream run id has not changed. Skipping tests."
+            echo "run_tests=false" >> "$GITHUB_OUTPUT"
           else
-            if [ "$LAST_RUN_ID" = "$NEW_RUN_ID" ]; then
-              echo "Upstream run id has not changed. Skipping tests."
-              echo "run_tests=false" >> $GITHUB_OUTPUT
-            else
-              echo "New upstream run id detected. Will run tests."
-              echo "run_tests=true" >> $GITHUB_OUTPUT
-            fi
+            echo "New upstream run id detected. Will run tests."
+            echo "run_tests=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger Tests Workflow if Necessary
+      - name: Generate GitHub App token
         if: steps.determine.outputs.run_tests == 'true'
-        uses: peter-evans/repository-dispatch@v2
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          token: ${{ secrets.PAT_TRIGGER_TARGET }}
+          app-id: ${{ vars.TRIGGER_APP_ID }}
+          private-key: ${{ secrets.TRIGGER_APP_PRIVATE_KEY }}
+
+      - name: Trigger Tests Workflow
+        if: steps.determine.outputs.run_tests == 'true'
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
           event-type: run-tests
           client-payload: '{"run_id": "${{ steps.get-run.outputs.run_id }}"}'
+
+      - name: Record processed upstream run id
+        # Record state only AFTER a successful dispatch. If this push fails, the worst
+        # case is a harmless duplicate test next hour — never a silently skipped deploy.
+        if: steps.determine.outputs.run_tests == 'true' && steps.get-run.outputs.run_id != 'none'
+        env:
+          NEW_RUN_ID: ${{ steps.get-run.outputs.run_id }}
+        run: |
+          case "$NEW_RUN_ID" in
+            ''|*[!0-9]*) echo "Refusing to record non-numeric run id: '$NEW_RUN_ID'"; exit 1 ;;
+          esac
+          echo "$NEW_RUN_ID" > .last_upstream_run_id.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .last_upstream_run_id.txt
+          if git diff --cached --quiet; then
+            echo "State file already up to date; nothing to commit."
+            exit 0
+          fi
+          git commit -m "[skip ci] Update last processed upstream run id to $NEW_RUN_ID"
+          # Be explicit about remote/branch so this works whether checkout left HEAD
+          # attached or detached, and push to wherever this run was triggered from.
+          BRANCH="${GITHUB_REF_NAME}"
+          git pull --rebase --autostash origin "$BRANCH" || true
+          git push origin "HEAD:${BRANCH}" || {
+            git pull --rebase --autostash origin "$BRANCH" && git push origin "HEAD:${BRANCH}"
+          }
